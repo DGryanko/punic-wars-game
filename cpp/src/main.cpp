@@ -394,9 +394,27 @@ void DrawSettings() {
 void DrawMenu() {
     ClearBackground(BLACK);
     
-    // Малюємо фон якщо завантажений
+    // Малюємо фон якщо завантажений (масштабуємо до розміру вікна)
     if (menuBackground.id > 0) {
-        DrawTexture(menuBackground, 0, 0, WHITE);
+        // Розраховуємо масштаб для заповнення екрану
+        float scaleX = 1434.0f / menuBackground.width;
+        float scaleY = 1075.0f / menuBackground.height;
+        float scale = (scaleX > scaleY) ? scaleX : scaleY; // Беремо більший масштаб
+        
+        // Центруємо фон
+        float drawWidth = menuBackground.width * scale;
+        float drawHeight = menuBackground.height * scale;
+        float offsetX = (1434 - drawWidth) / 2;
+        float offsetY = (1075 - drawHeight) / 2;
+        
+        DrawTexturePro(
+            menuBackground,
+            {0, 0, (float)menuBackground.width, (float)menuBackground.height},
+            {offsetX, offsetY, drawWidth, drawHeight},
+            {0, 0},
+            0.0f,
+            WHITE
+        );
     }
     
     // Напівпрозорий оверлей для кращої читабельності
@@ -440,9 +458,9 @@ void DrawMenu() {
         }
     }
     
-    // Інструкції
-    DrawText("Rome vs Carthage", 430, 600, 16, GRAY);
-    DrawText("Press ESC to exit", 440, 630, 14, DARKGRAY);
+    // Інструкції (нижче кнопок)
+    DrawText("Rome vs Carthage", 430, 580, 16, GRAY);
+    DrawText("Press ESC to exit", 440, 610, 14, DARKGRAY);
 }
 
 // Функція для екрану вибору фракції
