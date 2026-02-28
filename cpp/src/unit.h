@@ -39,6 +39,14 @@ struct Unit {
     bool is_attacking = false;     // Чи зараз атакує
     int target_unit_id = -1;       // ID цільового юніта для атаки
     
+    // Pathfinding поля
+    std::vector<Vector2> path;        // Поточний шлях
+    int currentWaypointIndex = 0;     // Індекс поточної точки шляху
+    float stuckTimer = 0.0f;          // Таймер для виявлення застрягання
+    Vector2 lastPosition = {0, 0};    // Остання позиція для виявлення застрягання
+    int unstuckAttempts = 0;          // Кількість спроб виходу з застрягання
+    bool usePathfinding = true;       // Чи використовувати pathfinding
+    
     // Ініціалізація юніта
     void init(std::string type, Faction unitFaction, int posX, int posY, bool aiControlled = false) {
         unit_type = type;
@@ -98,30 +106,32 @@ struct Unit {
             }
         }
         
-        // Рух з перевіркою колізій
+        // Рух з pathfinding або старим способом
         if (is_moving && !is_attacking) {
-            // Обчислення відстані до цілі
-            float dx = target_x - x;
-            float dy = target_y - y;
-            float distance = sqrt(dx * dx + dy * dy);
-            
-            // Якщо близько до цілі, зупинитися
-            if (distance < speed + 1.0f) {
-                x = target_x;
-                y = target_y;
-                is_moving = false;
+            if (usePathfinding && hasPath()) {
+                // Використовуємо pathfinding
+                followPath(GetFrameTime());
+                checkIfStuck(GetFrameTime());
             } else {
-                // Рух до цілі з нормалізованим вектором
-                float move_x = (dx / distance) * speed;
-                float move_y = (dy / distance) * speed;
+                // Старий спосіб руху (для сумісності)
+                float dx = target_x - x;
+                float dy = target_y - y;
+                float distance = sqrt(dx * dx + dy * dy);
                 
-                // Нова позиція
-                int new_x = x + (int)round(move_x);
-                int new_y = y + (int)round(move_y);
-                
-                // Простий рух (колізії будуть перевірені в main.cpp)
-                x = new_x;
-                y = new_y;
+                if (distance < speed + 1.0f) {
+                    x = target_x;
+                    y = target_y;
+                    is_moving = false;
+                } else {
+                    float move_x = (dx / distance) * speed;
+                    float move_y = (dy / distance) * speed;
+                    
+                    int new_x = x + (int)round(move_x);
+                    int new_y = y + (int)round(move_y);
+                    
+                    x = new_x;
+                    y = new_y;
+                }
             }
         }
     }
@@ -167,7 +177,141 @@ struct Unit {
         target_x = newX;
         target_y = newY;
         is_moving = true;
-        is_harvesting = false; // Припинити збір при русі
+        is_harvesting = false; // ВАЖЛИВО: припинити збір при русі
+        printf("[MOVETO] Unit at (%d,%d) moving to (%d,%d), is_moving=true\n", x, y, newX, newY);
+    }
+    
+    // Встановити шлях для pathfinding
+    void setPath(const std::vector<Vector2>& newPath) {
+        path = newPath;
+        currentWaypointIndex = 0;
+        stuckTimer = 0.0f;
+        unstuckAttempts = 0;
+        lastPosition = {(float)x, (float)y};
+        
+        if (!path.empty()) {
+            is_moving = true;
+            target_x = (int)path[0].x;
+            target_y = (int)path[0].y;
+        }
+    }
+    
+    // Перевірити чи є шлях
+    bool hasPath() const {
+        return !path.empty() && currentWaypointIndex < path.size();
+    }
+    
+    // Очистити шлях
+    void clearPath() {
+        path.clear();
+        currentWaypointIndex = 0;
+        is_moving = false;
+    }
+    
+    // Слідувати по шляху
+    void followPath(float deltaTime) {
+        if (!hasPath()) {
+            return;
+        }
+        
+        // Отримуємо поточну точку шляху
+        Vector2 waypoint = path[currentWaypointIndex];
+        
+        // Обчислюємо відстань до точки
+        float dx = waypoint.x - x;
+        float dy = waypoint.y - y;
+        float distance = sqrt(dx * dx + dy * dy);
+        
+        // Якщо досягли точки, переходимо до наступної
+        if (distance < speed + 2.0f) {
+            currentWaypointIndex++;
+            
+            if (currentWaypointIndex >= path.size()) {
+                // Досягли кінця шляху
+                x = (int)waypoint.x;
+                y = (int)waypoint.y;
+                is_moving = false;
+                clearPath();
+                return;
+            }
+            
+            // Оновлюємо ціль до наступної точки
+            waypoint = path[currentWaypointIndex];
+            target_x = (int)waypoint.x;
+            target_y = (int)waypoint.y;
+        }
+        
+        // Рухаємося до поточної точки
+        if (distance > 0) {
+            float move_x = (dx / distance) * speed;
+            float move_y = (dy / distance) * speed;
+            
+            x += (int)round(move_x);
+            y += (int)round(move_y);
+        }
+    }
+    
+    // Перевірити чи юніт застряг
+    void checkIfStuck(float deltaTime) {
+        if (!is_moving || !usePathfinding) {
+            return;
+        }
+        
+        // Перевіряємо чи змінилася позиція
+        float dx = x - lastPosition.x;
+        float dy = y - lastPosition.y;
+        float distMoved = sqrt(dx * dx + dy * dy);
+        
+        if (distMoved < 0.5f) {
+            // Не рухається
+            stuckTimer += deltaTime;
+            
+            if (stuckTimer > 1.0f) {  // Зменшено з 2.0f до 1.0f
+                // Застряг!
+                printf("[STUCK] Unit at (%d,%d) stuck for %.1f seconds\n", x, y, stuckTimer);
+                tryUnstuck();
+                stuckTimer = 0.0f;
+            }
+        } else {
+            // Рухається нормально
+            stuckTimer = 0.0f;
+            unstuckAttempts = 0;  // Скидаємо лічильник спроб
+            lastPosition = {(float)x, (float)y};
+        }
+    }
+    
+    // Спробувати вийти з застряглої ситуації
+    void tryUnstuck() {
+        unstuckAttempts++;
+        
+        printf("[UNSTUCK] Unit at (%d,%d) stuck! Attempt #%d\n", x, y, unstuckAttempts);
+        
+        if (unstuckAttempts >= 2) {
+            // Після 2 спроб - очищаємо шлях, щоб перерахувати через pathfinding
+            printf("[UNSTUCK] Unit at (%d,%d) clearing path after %d attempts - will request new path\n", 
+                   x, y, unstuckAttempts);
+            clearPath();
+            unstuckAttempts = 0;
+            stuckTimer = 0.0f;
+            // Встановлюємо is_moving = true, щоб гравець міг клікнути знову
+            is_moving = false;
+            return;
+        }
+        
+        // Перша спроба - рухнутися в випадковому напрямку
+        const int offsets[] = {-24, -16, 0, 16, 24};
+        int offsetX = offsets[rand() % 5];
+        int offsetY = offsets[rand() % 5];
+        
+        // Не рухатися на місці
+        if (offsetX == 0 && offsetY == 0) {
+            offsetX = 16;
+        }
+        
+        x += offsetX;
+        y += offsetY;
+        
+        printf("[UNSTUCK] Unit moved by (%d,%d) to (%d,%d)\n", offsetX, offsetY, x, y);
     }
     
     // Призначити ресурсну точку для збору
@@ -177,6 +321,7 @@ struct Unit {
         dropoff_building_x = buildingX;
         dropoff_building_y = buildingY;
         moveTo(resourceX, resourceY);
+        printf("Unit assigned: resource(%d,%d) building(%d,%d)\n", resourceX, resourceY, buildingX, buildingY);
     }
     
     // Перевірити, чи призначена ресурсна точка
@@ -215,6 +360,11 @@ struct Unit {
             float ratio = (float)totalSpace / totalToAdd;
             carrying_food += (int)(food * ratio);
             carrying_gold += (int)(gold * ratio);
+        }
+        
+        // Якщо повний, зупинити збір
+        if (!canCarryMore()) {
+            stopHarvesting();
         }
     }
     

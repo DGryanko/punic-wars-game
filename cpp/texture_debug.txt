@@ -1,0 +1,6 @@
+Cursor Idle ID: 6, Size: 32x32
+Cursor Hover ID: 7, Size: 32x32
+Cursor Click ID: 8, Size: 32x32
+Resource Panel ID: 9, Size: 1027x105
+Button Base ID: 10, Size: 661x201
+Button Hover ID: 11, Size: 661x201

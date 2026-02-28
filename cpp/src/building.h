@@ -109,17 +109,19 @@ struct Building {
     }
     
     // Почати виробництво юніта або додати до черги
-    bool startProduction(const std::string& unitType) {
+    bool startProduction(const std::string& unitType, bool& shouldPayNow) {
         // Перевірка обмежень
         if (type == BARRACKS_ROME && unitType == "legionary" && units_produced >= 8) {
+            shouldPayNow = false;
             return false; // Максимум 8 легіонерів на контуберній
         }
         
         if (!is_producing) {
-            // Почати виробництво відразу
+            // Почати виробництво відразу - ПЛАТИМО ЗАРАЗ
             is_producing = true;
             producing_unit = unitType;
             production_progress = 0.0f;
+            shouldPayNow = true; // Платимо зараз
             
             // Встановлення часу виробництва (збільшено вдвоє)
             if (unitType == "legionary") {
@@ -130,8 +132,9 @@ struct Building {
                 production_time = 6.0f; // 6 секунд (було 3)
             }
         } else {
-            // Додати до черги
+            // Додати до черги - НЕ ПЛАТИМО ЗАРАЗ
             production_queue.push_back(unitType);
+            shouldPayNow = false; // Заплатимо пізніше
         }
         
         return true;
@@ -152,14 +155,19 @@ struct Building {
     }
     
     // Оновлення виробництва
-    void updateProduction(float deltaTime) {
+    void updateProduction(float deltaTime, std::string& startedUnit, std::string& completedUnit) {
+        startedUnit = ""; // За замовчуванням нічого не почалося
+        completedUnit = ""; // За замовчуванням нічого не завершилось
+        
         if (is_producing) {
             production_progress += deltaTime;
             if (production_progress >= production_time) {
                 // Виробництво завершено
+                completedUnit = producing_unit; // Зберігаємо завершений юніт
                 is_producing = false;
                 production_progress = 0.0f;
                 units_produced++;
+                producing_unit = ""; // Очищаємо
                 
                 // Почати наступний елемент з черги
                 if (!production_queue.empty()) {
@@ -170,6 +178,7 @@ struct Building {
                     is_producing = true;
                     producing_unit = nextUnit;
                     production_progress = 0.0f;
+                    startedUnit = nextUnit; // Повідомляємо що почався новий юніт
                     
                     if (nextUnit == "legionary") {
                         production_time = 10.0f;

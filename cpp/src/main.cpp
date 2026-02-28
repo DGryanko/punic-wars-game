@@ -2,7 +2,10 @@
 #include "building.h"
 #include "unit.h"
 #include "resource.h"
+#include "pathfinding.h"
+#include "ui_button.h"
 #include <vector>
+#include <cmath>
 
 // Стани гри
 enum GameState {
@@ -38,8 +41,12 @@ GameState currentState = MENU;
 Faction playerFaction = ROME; // Фракція гравця
 int rome_food = 200;
 int rome_money = 100;
+int rome_food_reserved = 0;  // Зарезервовані ресурси
+int rome_money_reserved = 0;
 int carth_food = 150;
 int carth_money = 200;
+int carth_food_reserved = 0;
+int carth_money_reserved = 0;
 
 // Музика та звуки
 Music menuMusic;
@@ -50,10 +57,31 @@ Music suspenseMusic[2];         // 2 треки напруги
 Music peacefulMusic[2];         // 2 мирні треки
 Music defeatMusic[2];           // 2 треки поразки
 Music currentMusic;
+Music nextMusic;                // Наступний трек для crossfade
 MusicState currentMusicState = MUSIC_MENU;
 MusicState previousMusicState = MUSIC_MENU;
 Texture2D menuBackground;
+Texture2D factionBackground;
 bool audioInitialized = false;
+
+// Текстури UI
+Texture2D cursorIdle;
+Texture2D cursorHover;
+Texture2D cursorClick;
+Texture2D resourcePanel;
+Texture2D buttonBase;
+Texture2D buttonHover;
+Texture2D gameLogo;
+bool logoLoaded = false;
+
+// Кастомний шрифт
+Font customFont;
+bool fontLoaded = false;
+
+// Crossfade параметри
+bool isCrossfading = false;
+float crossfadeTimer = 0.0f;
+const float CROSSFADE_DURATION = 2.0f; // 2 секунди для плавного переходу
 
 // Таймери для музичної логіки
 float combatTimer = 0.0f;           // Скільки часу йде бій
@@ -67,6 +95,9 @@ std::vector<Unit> units;
 std::vector<ResourcePoint> resources;
 int selectedBuildingIndex = -1;
 int selectedUnitIndex = -1;
+
+// Pathfinding система
+PathfindingManager pathfindingManager;
 
 // Система виділення областю
 bool isDragging = false;
@@ -87,53 +118,85 @@ enum CursorType {
 
 CursorType currentCursor = CURSOR_DEFAULT;
 
-// Функція для перемикання музики
+// Функція для перемикання музики з плавним переходом
 void SwitchMusic(MusicState newState) {
     if (currentMusicState == newState || !audioInitialized) return;
-    
-    // Зупиняємо поточну музику
-    StopMusicStream(currentMusic);
     
     // Вибираємо нову музику (випадковий трек з двох)
     int randomTrack = rand() % 2; // 0 або 1
     
     switch (newState) {
         case MUSIC_MENU:
-            currentMusic = menuMusic;
+            nextMusic = menuMusic;
             break;
         case MUSIC_AMBIENT:
-            currentMusic = ambientMusic[randomTrack];
+            nextMusic = ambientMusic[randomTrack];
             break;
         case MUSIC_BATTLE_ROME:
-            currentMusic = battleMusicRome[randomTrack];
+            nextMusic = battleMusicRome[randomTrack];
             break;
         case MUSIC_BATTLE_CARTHAGE:
-            currentMusic = battleMusicCarthage[randomTrack];
+            nextMusic = battleMusicCarthage[randomTrack];
             break;
         case MUSIC_SUSPENSE:
-            currentMusic = suspenseMusic[randomTrack];
+            nextMusic = suspenseMusic[randomTrack];
             break;
         case MUSIC_PEACEFUL:
-            currentMusic = peacefulMusic[randomTrack];
+            nextMusic = peacefulMusic[randomTrack];
             break;
         case MUSIC_DEFEAT:
-            currentMusic = defeatMusic[randomTrack];
+            nextMusic = defeatMusic[randomTrack];
             break;
     }
     
-    // Запускаємо нову музику
-    SetMusicVolume(currentMusic, audioSettings.musicVolume);
-    PlayMusicStream(currentMusic);
+    // Починаємо crossfade
+    isCrossfading = true;
+    crossfadeTimer = 0.0f;
+    
+    // Запускаємо новий трек з нульовою гучністю
+    SetMusicVolume(nextMusic, 0.0f);
+    PlayMusicStream(nextMusic);
+    
     previousMusicState = currentMusicState;
     currentMusicState = newState;
+}
+
+// Функція для оновлення crossfade
+void UpdateCrossfade() {
+    if (!isCrossfading || !audioInitialized) return;
+    
+    crossfadeTimer += GetFrameTime();
+    float progress = crossfadeTimer / CROSSFADE_DURATION;
+    
+    if (progress >= 1.0f) {
+        // Завершуємо crossfade
+        progress = 1.0f;
+        isCrossfading = false;
+        StopMusicStream(currentMusic);
+        currentMusic = nextMusic;
+    }
+    
+    // Плавно зменшуємо гучність старого треку
+    float oldVolume = audioSettings.musicVolume * (1.0f - progress);
+    SetMusicVolume(currentMusic, oldVolume);
+    
+    // Плавно збільшуємо гучність нового треку
+    float newVolume = audioSettings.musicVolume * progress;
+    SetMusicVolume(nextMusic, newVolume);
 }
 
 // Функція для оновлення музичного стану в грі
 void UpdateGameMusic() {
     if (!audioInitialized) return;
     
+    // Оновлюємо crossfade якщо активний
+    if (isCrossfading) {
+        UpdateCrossfade();
+        UpdateMusicStream(nextMusic); // Оновлюємо обидва треки під час crossfade
+    }
+    
     // Перевіряємо чи трек закінчився і запускаємо новий випадковий
-    if (!IsMusicStreamPlaying(currentMusic)) {
+    if (!IsMusicStreamPlaying(currentMusic) && !isCrossfading) {
         // Трек закінчився, запускаємо новий випадковий того ж типу
         int randomTrack = rand() % 2;
         
@@ -245,9 +308,24 @@ UnitCost getUnitCost(const std::string& unitType) {
 bool canAfford(Faction faction, const std::string& unitType) {
     UnitCost cost = getUnitCost(unitType);
     if (faction == ROME) {
-        return rome_food >= cost.food && rome_money >= cost.money;
+        int available_food = rome_food - rome_food_reserved;
+        int available_money = rome_money - rome_money_reserved;
+        return available_food >= cost.food && available_money >= cost.money;
     } else {
-        return carth_food >= cost.food && carth_money >= cost.money;
+        int available_food = carth_food - carth_food_reserved;
+        int available_money = carth_money - carth_money_reserved;
+        return available_food >= cost.food && available_money >= cost.money;
+    }
+}
+
+void reserveResources(Faction faction, const std::string& unitType) {
+    UnitCost cost = getUnitCost(unitType);
+    if (faction == ROME) {
+        rome_food_reserved += cost.food;
+        rome_money_reserved += cost.money;
+    } else {
+        carth_food_reserved += cost.food;
+        carth_money_reserved += cost.money;
     }
 }
 
@@ -256,9 +334,24 @@ void spendResources(Faction faction, const std::string& unitType) {
     if (faction == ROME) {
         rome_food -= cost.food;
         rome_money -= cost.money;
+        rome_food_reserved -= cost.food;
+        rome_money_reserved -= cost.money;
     } else {
         carth_food -= cost.food;
         carth_money -= cost.money;
+        carth_food_reserved -= cost.food;
+        carth_money_reserved -= cost.money;
+    }
+}
+
+void unreserveResources(Faction faction, const std::string& unitType) {
+    UnitCost cost = getUnitCost(unitType);
+    if (faction == ROME) {
+        rome_food_reserved -= cost.food;
+        rome_money_reserved -= cost.money;
+    } else {
+        carth_food_reserved -= cost.food;
+        carth_money_reserved -= cost.money;
     }
 }
 
@@ -306,7 +399,7 @@ void UpdateCursor() {
         if (unit.selected && unit.faction == playerFaction) {
             if (unit.can_harvest) {
                 hasSelectedHarvesters = true;
-            } else {
+            } else if (unit.attack_damage > 0) {
                 hasSelectedSoldiers = true;
             }
         }
@@ -325,9 +418,12 @@ void UpdateCursor() {
     // Перевіряємо наведення на ворожих юнітів
     if (hasSelectedSoldiers) {
         for (const auto& unit : units) {
-            if (unit.faction != playerFaction && CheckCollisionPointCircle(mousePos, {(float)unit.x, (float)unit.y}, 8)) {
-                currentCursor = CURSOR_ATTACK;
-                return;
+            if (unit.faction != playerFaction) {
+                // Збільшуємо радіус перевірки до 16 пікселів
+                if (CheckCollisionPointCircle(mousePos, {(float)unit.x, (float)unit.y}, 16)) {
+                    currentCursor = CURSOR_ATTACK;
+                    return;
+                }
             }
         }
     }
@@ -337,21 +433,29 @@ void UpdateCursor() {
 void DrawCustomCursor() {
     Vector2 mousePos = GetMousePosition();
     
+    // Вибираємо текстуру курсора
+    Texture2D* cursorTexture = &cursorIdle;
+    
     switch (currentCursor) {
         case CURSOR_HARVEST:
-            // Курсор збору ресурсів
-            DrawCircle((int)mousePos.x, (int)mousePos.y, 8, {0, 255, 0, 100});
-            DrawText("H", (int)mousePos.x - 4, (int)mousePos.y - 6, 12, GREEN);
+            cursorTexture = &cursorHover;
             break;
         case CURSOR_ATTACK:
-            // Курсор атаки
-            DrawCircle((int)mousePos.x, (int)mousePos.y, 8, {255, 0, 0, 100});
-            DrawText("X", (int)mousePos.x - 4, (int)mousePos.y - 6, 12, RED);
+            cursorTexture = &cursorClick;
             break;
         case CURSOR_DEFAULT:
         default:
-            // Звичайний курсор (не малюємо нічого, використовуємо системний)
+            cursorTexture = &cursorIdle;
             break;
+    }
+    
+    // Малюємо курсор якщо текстура завантажена
+    if (cursorTexture->id > 0) {
+        // Малюємо курсор з верхнім лівим кутом в позиції миші (стандартна поведінка курсора)
+        DrawTextureV(*cursorTexture, mousePos, WHITE);
+    } else {
+        // Fallback - малюємо червоний квадрат якщо текстура не завантажена
+        DrawCircle((int)mousePos.x, (int)mousePos.y, 5, RED);
     }
 }
 
@@ -361,15 +465,36 @@ void ProcessResourceHarvesting() {
         if (unit.faction == playerFaction && unit.can_harvest) {
             // Якщо раб має призначену ресурсну точку
             if (unit.hasAssignedResource()) {
+                // Перевіряємо чи ресурс ще існує
+                bool resourceExists = false;
+                for (const auto& resource : resources) {
+                    if (!resource.depleted) {
+                        float dist = sqrt(pow(unit.assigned_resource_x - (resource.x + 20), 2) + 
+                                        pow(unit.assigned_resource_y - (resource.y + 20), 2));
+                        if (dist < 5) {
+                            resourceExists = true;
+                            break;
+                        }
+                    }
+                }
+                
+                // Якщо ресурс вичерпано, скидаємо призначення
+                if (!resourceExists) {
+                    unit.assigned_resource_x = -1;
+                    unit.assigned_resource_y = -1;
+                    unit.stopHarvesting();
+                    continue;
+                }
+                
                 // Якщо раб повний, йти здавати ресурси
                 if (!unit.canCarryMore() && (unit.carrying_food > 0 || unit.carrying_gold > 0)) {
-                    if (!unit.is_moving) {
-                        unit.moveTo(unit.dropoff_building_x, unit.dropoff_building_y);
-                    }
+                    // КРИТИЧНО: примусово зупинити збір
+                    unit.is_harvesting = false;
                     
                     // Перевірка, чи поруч з будівлею для здачі
                     float distToBuilding = sqrt(pow(unit.x - unit.dropoff_building_x, 2) + 
                                                pow(unit.y - unit.dropoff_building_y, 2));
+                    
                     if (distToBuilding < 50) {
                         // Здати ресурси
                         int food, gold;
@@ -383,12 +508,37 @@ void ProcessResourceHarvesting() {
                             carth_money += gold;
                         }
                         
+                        printf("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
+                               food, gold, rome_food, rome_money);
                         // Повернутися до ресурсу
                         unit.moveTo(unit.assigned_resource_x, unit.assigned_resource_y);
+                        printf("[RETURN] Returning to resource at (%d,%d)\n", 
+                               unit.assigned_resource_x, unit.assigned_resource_y);
+                    } else {
+                        // Перевіряємо чи раб рухається до правильної цілі
+                        bool movingToCorrectTarget = (unit.target_x == unit.dropoff_building_x && 
+                                                     unit.target_y == unit.dropoff_building_y);
+                        
+                        // Дебаг лог кожні 30 кадрів
+                        static int debugCounter = 0;
+                        if (++debugCounter % 30 == 0) {
+                            printf("[FULL DEBUG] Slave at (%d,%d) full, target=(%d,%d), dropoff=(%d,%d), is_moving=%d, movingToCorrect=%d\n",
+                                   unit.x, unit.y, unit.target_x, unit.target_y, 
+                                   unit.dropoff_building_x, unit.dropoff_building_y,
+                                   unit.is_moving, movingToCorrectTarget);
+                        }
+                        
+                        // Якщо не рухається до будівлі, примусово відправити
+                        if (!movingToCorrectTarget) {
+                            unit.moveTo(unit.dropoff_building_x, unit.dropoff_building_y);
+                            printf("[FORCE MOVE] Forcing move to dropoff building at (%d, %d)\n", 
+                                   unit.dropoff_building_x, unit.dropoff_building_y);
+                        }
                     }
                 }
                 // Якщо раб не повний і поруч з ресурсом, збирати
-                else if (!unit.is_moving) {
+                else {
+                    bool foundNearbyResource = false;
                     for (auto& resource : resources) {
                         if (!resource.depleted) {
                             float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + 
@@ -398,7 +548,7 @@ void ProcessResourceHarvesting() {
                                 unit.startHarvesting();
                                 
                                 // Збираємо ресурс
-                                int harvestAmount = 2; // 2 одиниці за кадр
+                                int harvestAmount = 1; // 1 одиниця за кадр (зменшено в 2 рази)
                                 int harvested = resource.harvest(harvestAmount);
                                 
                                 if (harvested > 0) {
@@ -407,10 +557,29 @@ void ProcessResourceHarvesting() {
                                     } else if (resource.type == GOLD_SOURCE) {
                                         unit.addResources(0, harvested);
                                     }
+                                    
+                                    // Логуємо тільки кожні 30 кадрів (раз на пів секунди)
+                                    static int harvestLogCounter = 0;
+                                    if (++harvestLogCounter % 30 == 0) {
+                                        printf("[HARVEST] Slave at (%d,%d) harvesting. Carrying: %d/%d\n", 
+                                               unit.x, unit.y, unit.carrying_food + unit.carrying_gold, unit.max_carry_capacity);
+                                    }
                                 }
                                 
+                                foundNearbyResource = true;
                                 break;
                             }
+                        }
+                    }
+                    
+                    // Якщо не знайшли ресурс поблизу і не рухаємося, йти до призначеного ресурсу
+                    if (!foundNearbyResource && !unit.is_moving) {
+                        float distToAssigned = sqrt(pow(unit.x - unit.assigned_resource_x, 2) + 
+                                                   pow(unit.y - unit.assigned_resource_y, 2));
+                        if (distToAssigned > 5) {
+                            unit.moveTo(unit.assigned_resource_x, unit.assigned_resource_y);
+                            printf("[GOTO] Slave moving to assigned resource at (%d,%d)\n", 
+                                   unit.assigned_resource_x, unit.assigned_resource_y);
                         }
                     }
                 }
@@ -426,7 +595,7 @@ void ProcessResourceHarvesting() {
                             unit.startHarvesting();
                             
                             // Збираємо ресурс
-                            int harvestAmount = 2; // 2 одиниці за кадр
+                            int harvestAmount = 1; // 1 одиниця за кадр (зменшено в 2 рази)
                             int harvested = resource.harvest(harvestAmount);
                             
                             if (harvested > 0) {
@@ -444,9 +613,10 @@ void ProcessResourceHarvesting() {
                 
                 // Перевіряємо, чи юніт поруч з квесторієм або HQ для здачі ресурсів
                 if (unit.carrying_food > 0 || unit.carrying_gold > 0) {
+                    // Спочатку шукаємо квесторіум
+                    bool foundQuestorium = false;
                     for (const auto& building : buildings) {
-                        if (building.faction == playerFaction && 
-                            (building.type == HQ_ROME || building.type == HQ_CARTHAGE || building.type == QUESTORIUM_ROME)) {
+                        if (building.faction == playerFaction && building.type == QUESTORIUM_ROME) {
                             float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
                             if (distance < 50) {
                                 // Здати ресурси
@@ -462,7 +632,34 @@ void ProcessResourceHarvesting() {
                                 }
                                 
                                 unit.stopHarvesting();
+                                foundQuestorium = true;
                                 break;
+                            }
+                        }
+                    }
+                    
+                    // Якщо не знайшли квесторіум, шукаємо HQ
+                    if (!foundQuestorium) {
+                        for (const auto& building : buildings) {
+                            if (building.faction == playerFaction && 
+                                (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
+                                float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
+                                if (distance < 50) {
+                                    // Здати ресурси
+                                    int food, gold;
+                                    unit.dropResources(food, gold);
+                                    
+                                    if (playerFaction == ROME) {
+                                        rome_food += food;
+                                        rome_money += gold;
+                                    } else {
+                                        carth_food += food;
+                                        carth_money += gold;
+                                    }
+                                    
+                                    unit.stopHarvesting();
+                                    break;
+                                }
                             }
                         }
                     }
@@ -500,6 +697,13 @@ void InitBuildings() {
     Building romeQuestorium;
     romeQuestorium.init(QUESTORIUM_ROME, ROME, 300, 100);
     buildings.push_back(romeQuestorium);
+    
+    // Ініціалізація pathfinding
+    pathfindingManager.init(1434, 1075);
+    pathfindingManager.updateGrid(buildings);
+    printf("[PATHFINDING] Navigation grid initialized: %dx%d cells\n", 
+           pathfindingManager.getGrid().getWidth(), 
+           pathfindingManager.getGrid().getHeight());
 }
 
 // Ініціалізація ресурсних точок
@@ -528,15 +732,42 @@ void InitResources() {
 // Створення юніта поруч з будівлею
 void SpawnUnit(const Building& building, const std::string& unitType) {
     Unit newUnit;
-    // Розміщуємо юніт поруч з будівлею
-    int spawnX = building.x + 90; // Праворуч від будівлі
-    int spawnY = building.y + 30; // По центру по висоті
+    
+    // Початкова позиція - праворуч від будівлі
+    int spawnX = building.x + 90;
+    int spawnY = building.y + 30;
+    
+    // Шукаємо найближчу вільну клітинку
+    int gridX, gridY;
+    pathfindingManager.getGrid().worldToGrid(spawnX, spawnY, gridX, gridY);
+    
+    bool foundFree = false;
+    // Шукаємо в радіусі до 5 клітинок
+    for (int radius = 0; radius <= 5 && !foundFree; radius++) {
+        for (int dy = -radius; dy <= radius && !foundFree; dy++) {
+            for (int dx = -radius; dx <= radius && !foundFree; dx++) {
+                int nx = gridX + dx;
+                int ny = gridY + dy;
+                if (pathfindingManager.getGrid().isWalkable(nx, ny)) {
+                    // Конвертуємо назад в світові координати
+                    pathfindingManager.getGrid().gridToWorld(nx, ny, spawnX, spawnY);
+                    foundFree = true;
+                }
+            }
+        }
+    }
+    
+    if (!foundFree) {
+        printf("[SPAWN] Warning: Could not find free spawn position for unit!\n");
+    }
     
     // Визначаємо, чи має юніт керуватися AI
     bool isAI = (building.faction != playerFaction);
     
     newUnit.init(unitType, building.faction, spawnX, spawnY, isAI);
     units.push_back(newUnit);
+    
+    printf("[SPAWN] Unit spawned at (%d, %d)\n", spawnX, spawnY);
 }
 
 // Функція для малювання меню налаштувань
@@ -572,12 +803,11 @@ void DrawSettings() {
     DrawRectangle(sliderX, 380, (int)(sliderWidth * audioSettings.effectsVolume), sliderHeight, RED);
     DrawText(TextFormat("%.0f%%", audioSettings.effectsVolume * 100), 820, 380, 20, WHITE);
     
-    // Кнопка назад
-    Rectangle backButton = {450, 500, 120, 40};
+    // Кнопка назад (без static)
+    DynamicButton backButton(450, 500, "BACK", 20);
     Vector2 mousePos = GetMousePosition();
-    bool backHover = CheckCollisionPointRec(mousePos, backButton);
-    DrawRectangleRec(backButton, backHover ? DARKGRAY : GRAY);
-    DrawText("BACK", 480, 510, 16, WHITE);
+    backButton.Update(mousePos);
+    backButton.Draw();
     
     // Обробка повзунків
     if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
@@ -602,12 +832,15 @@ void DrawSettings() {
     }
     
     // Обробка кнопки назад
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && backHover) {
+    if (backButton.IsClicked()) {
         currentState = MENU;
     }
     
     // Інструкції
     DrawText("Adjust audio settings", 430, 450, 16, GRAY);
+    
+    // Малювання курсора
+    DrawCustomCursor();
 }
 
 // Функція для малювання меню
@@ -637,121 +870,155 @@ void DrawMenu() {
         );
     }
     
-    // Напівпрозорий оверлей для кращої читабельності
-    DrawRectangle(0, 0, 1434, 1075, {0, 0, 0, 150});
+    // Напівпрозорий оверлей для кращої читабельності - ПРИБРАНО
+    // DrawRectangle(0, 0, 1434, 1075, {0, 0, 0, 150});
     
-    // Заголовок
-    DrawText("PUNIC WARS: CASTRA", 280, 200, 40, GOLD);
-    DrawText("Mini-RTS Game", 420, 250, 20, LIGHTGRAY);
-    
-    // Кнопки меню
-    Rectangle startButton = {400, 350, 200, 50};
-    Rectangle settingsButton = {400, 420, 200, 50};
-    Rectangle exitButton = {400, 490, 200, 50};
-    
-    // Перевірка наведення миші
-    Vector2 mousePos = GetMousePosition();
-    bool startHover = CheckCollisionPointRec(mousePos, startButton);
-    bool settingsHover = CheckCollisionPointRec(mousePos, settingsButton);
-    bool exitHover = CheckCollisionPointRec(mousePos, exitButton);
-    
-    // Малювання кнопок
-    DrawRectangleRec(startButton, startHover ? DARKGREEN : GREEN);
-    DrawRectangleRec(settingsButton, settingsHover ? DARKBLUE : BLUE);
-    DrawRectangleRec(exitButton, exitHover ? MAROON : RED);
-    
-    // Текст кнопок
-    DrawText("START GAME", 450, 365, 20, WHITE);
-    DrawText("SETTINGS", 460, 435, 20, WHITE);
-    DrawText("EXIT", 480, 505, 20, WHITE);
-    
-    // Обробка кліків
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        if (startHover) {
-            currentState = FACTION_SELECT; // Переходимо до вибору фракції
-        }
-        if (settingsHover) {
-            currentState = SETTINGS;
-        }
-        if (exitHover) {
-            currentState = EXIT;
-        }
+    // Малюємо логотип якщо завантажений
+    if (logoLoaded && gameLogo.id > 0) {
+        // Розраховуємо розмір логотипу (зменшуємо до 15% від оригінального розміру)
+        float logoScale = 0.15f;
+        float logoWidth = gameLogo.width * logoScale;
+        float logoHeight = gameLogo.height * logoScale;
+        
+        // Центруємо логотип вгорі
+        float logoX = (1434 - logoWidth) / 2;
+        float logoY = 80;
+        
+        DrawTexturePro(
+            gameLogo,
+            {0, 0, (float)gameLogo.width, (float)gameLogo.height},
+            {logoX, logoY, logoWidth, logoHeight},
+            {0, 0},
+            0.0f,
+            WHITE
+        );
     }
     
-    // Інструкції (нижче кнопок)
-    DrawText("Rome vs Carthage", 430, 580, 16, GRAY);
-    DrawText("Press ESC to exit", 440, 610, 14, DARKGRAY);
+    // Підзаголовок прибрано - не потрібен
+    
+    // Створюємо динамічні кнопки з нормальним шрифтом (без static, щоб позиції оновлювалися)
+    // Відцентровуємо кнопки по горизонталі (ширина екрану 1434)
+    // Кнопки мають бути симетричні відносно центру
+    // Опускаємо кнопки нижче (додаємо висоту однієї кнопки ~92px)
+    DynamicButton startButton(400, 440, "START GAME", 24);
+    DynamicButton settingsButton(400, 550, "SETTINGS", 24);
+    DynamicButton exitButton(400, 660, "EXIT", 24);
+    
+    // Розраховуємо центр для кожної кнопки
+    float centerX = 1434.0f / 2.0f;
+    startButton.bounds.x = centerX - startButton.bounds.width / 2.0f;
+    settingsButton.bounds.x = centerX - settingsButton.bounds.width / 2.0f;
+    exitButton.bounds.x = centerX - exitButton.bounds.width / 2.0f;
+    
+    // Оновлюємо стан кнопок
+    Vector2 mousePos = GetMousePosition();
+    startButton.Update(mousePos);
+    settingsButton.Update(mousePos);
+    exitButton.Update(mousePos);
+    
+    // Малюємо кнопки
+    startButton.Draw();
+    settingsButton.Draw();
+    exitButton.Draw();
+    
+    // Обробка кліків
+    if (startButton.IsClicked()) {
+        currentState = FACTION_SELECT; // Переходимо до вибору фракції
+    }
+    if (settingsButton.IsClicked()) {
+        currentState = SETTINGS;
+    }
+    if (exitButton.IsClicked()) {
+        currentState = EXIT;
+    }
+    
+    // Малювання курсора
+    DrawCustomCursor();
 }
 
 // Функція для екрану вибору фракції
 void DrawFactionSelect() {
     ClearBackground(BLACK);
     
+    // Малюємо фон якщо завантажений (масштабуємо до розміру вікна)
+    if (factionBackground.id > 0) {
+        float scaleX = 1434.0f / factionBackground.width;
+        float scaleY = 1075.0f / factionBackground.height;
+        float scale = (scaleX > scaleY) ? scaleX : scaleY;
+        
+        float drawWidth = factionBackground.width * scale;
+        float drawHeight = factionBackground.height * scale;
+        float offsetX = (1434 - drawWidth) / 2;
+        float offsetY = (1075 - drawHeight) / 2;
+        
+        DrawTexturePro(
+            factionBackground,
+            {0, 0, (float)factionBackground.width, (float)factionBackground.height},
+            {offsetX, offsetY, drawWidth, drawHeight},
+            {0, 0},
+            0.0f,
+            WHITE
+        );
+    }
+    
     // Заголовок
-    DrawText("CHOOSE YOUR FACTION", 320, 150, 30, GOLD);
+    DrawText("CHOOSE YOUR FACTION", 420, 150, 30, GOLD);
     
-    // Кнопки фракцій
-    Rectangle romeButton = {200, 300, 250, 100};
-    Rectangle carthageButton = {574, 300, 250, 100};
-    Rectangle backButton = {450, 500, 120, 40};
+    // Створюємо динамічні кнопки (без static)
+    DynamicButton romeButton(400, 350, "ROME", 30);
+    DynamicButton carthageButton(400, 460, "CARTHAGE", 30);
+    DynamicButton backButton(400, 650, "BACK", 20);
     
-    // Перевірка наведення миші
+    // Відцентровуємо кнопки
+    float centerX = 1434.0f / 2.0f;
+    romeButton.bounds.x = centerX - romeButton.bounds.width / 2.0f;
+    carthageButton.bounds.x = centerX - carthageButton.bounds.width / 2.0f;
+    backButton.bounds.x = centerX - backButton.bounds.width / 2.0f;
+    
+    // Оновлюємо стан кнопок
     Vector2 mousePos = GetMousePosition();
-    bool romeHover = CheckCollisionPointRec(mousePos, romeButton);
-    bool carthageHover = CheckCollisionPointRec(mousePos, carthageButton);
-    bool backHover = CheckCollisionPointRec(mousePos, backButton);
+    romeButton.Update(mousePos);
+    carthageButton.Update(mousePos);
+    backButton.Update(mousePos);
     
-    // Малювання кнопок фракцій
-    DrawRectangleRec(romeButton, romeHover ? RED : MAROON);
-    DrawRectangleRec(carthageButton, carthageHover ? DARKBLUE : BLUE);
-    DrawRectangleRec(backButton, backHover ? DARKGRAY : GRAY);
-    
-    // Текст кнопок
-    DrawText("ROME", 290, 330, 30, WHITE);
-    DrawText("Strong legions", 220, 360, 16, LIGHTGRAY);
-    DrawText("High morale", 230, 375, 16, LIGHTGRAY);
-    
-    DrawText("CARTHAGE", 630, 330, 30, WHITE);
-    DrawText("Elite mercenaries", 600, 360, 16, LIGHTGRAY);
-    DrawText("Rich traders", 620, 375, 16, LIGHTGRAY);
-    
-    DrawText("BACK", 480, 510, 16, WHITE);
+    // Малюємо кнопки
+    romeButton.Draw();
+    carthageButton.Draw();
+    backButton.Draw();
     
     // Обробка кліків
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        if (romeHover) {
-            playerFaction = ROME;
-            currentState = PLAYING;
-            InitBuildings();
-            InitResources();
-            units.clear();
-            // Запускаємо амбієнт музику для геймплею
-            if (audioInitialized) {
-                SwitchMusic(MUSIC_AMBIENT);
-            }
+    if (romeButton.IsClicked()) {
+        playerFaction = ROME;
+        currentState = PLAYING;
+        InitBuildings();
+        InitResources();
+        units.clear();
+        // Запускаємо амбієнт музику для геймплею
+        if (audioInitialized) {
+            SwitchMusic(MUSIC_AMBIENT);
         }
-        if (carthageHover) {
-            playerFaction = CARTHAGE;
-            currentState = PLAYING;
-            InitBuildings();
-            InitResources();
-            units.clear();
-            // Запускаємо амбієнт музику для геймплею
-            if (audioInitialized) {
-                SwitchMusic(MUSIC_AMBIENT);
-            }
+    }
+    if (carthageButton.IsClicked()) {
+        playerFaction = CARTHAGE;
+        currentState = PLAYING;
+        InitBuildings();
+        InitResources();
+        units.clear();
+        // Запускаємо амбієнт музику для геймплею
+        if (audioInitialized) {
+            SwitchMusic(MUSIC_AMBIENT);
         }
-        if (backHover) {
-            currentState = MENU;
-            // Повертаємось до меню музики
-            if (audioInitialized) {
-                SwitchMusic(MUSIC_MENU);
-            }
+    }
+    if (backButton.IsClicked()) {
+        currentState = MENU;
+        // Повертаємось до меню музики
+        if (audioInitialized) {
+            SwitchMusic(MUSIC_MENU);
         }
     }
     
-    // Інструкції
-    DrawText("Choose your faction to begin the campaign", 350, 450, 16, GRAY);
+    // Малювання курсора
+    DrawCustomCursor();
 }
 
 // Функція для малювання панелі замовлення юнітів
@@ -806,19 +1073,27 @@ void DrawUnitOrderPanel() {
             if (CheckCollisionPointRec(mousePos, legionaryButton)) {
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     if (canAffordUnit && canProduce) {
-                        if (buildings[selectedBuildingIndex].startProduction("legionary")) {
-                            spendResources(ROME, "legionary");
-                            printf("Started producing legionary\n");
+                        bool shouldPayNow = false;
+                        if (buildings[selectedBuildingIndex].startProduction("legionary", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                // Резервуємо і одразу витрачаємо
+                                reserveResources(ROME, "legionary");
+                                spendResources(ROME, "legionary");
+                                printf("Started producing legionary (paid now)\n");
+                            } else {
+                                // Тільки резервуємо
+                                reserveResources(ROME, "legionary");
+                                printf("Queued legionary (reserved resources)\n");
+                            }
                         }
                     } else {
                         printf("Cannot afford legionary or max units reached\n");
                     }
                 } else if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
                     if (buildings[selectedBuildingIndex].cancelLastInQueue()) {
-                        // Повернути ресурси за скасований юніт
-                        rome_food += cost.food;
-                        rome_money += cost.money;
-                        printf("Cancelled legionary production\n");
+                        // Повертаємо зарезервовані ресурси
+                        unreserveResources(ROME, "legionary");
+                        printf("Cancelled legionary production (unreserved)\n");
                     }
                 }
             }
@@ -853,18 +1128,24 @@ void DrawUnitOrderPanel() {
             if (CheckCollisionPointRec(mousePos, phoenicianButton)) {
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     if (canAffordUnit && canProduce) {
-                        if (buildings[selectedBuildingIndex].startProduction("phoenician")) {
-                            spendResources(CARTHAGE, "phoenician");
-                            printf("Started producing phoenician\n");
+                        bool shouldPayNow = false;
+                        if (buildings[selectedBuildingIndex].startProduction("phoenician", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(CARTHAGE, "phoenician");
+                                spendResources(CARTHAGE, "phoenician");
+                                printf("Started producing phoenician (paid now)\n");
+                            } else {
+                                reserveResources(CARTHAGE, "phoenician");
+                                printf("Queued phoenician (reserved resources)\n");
+                            }
                         }
                     } else {
                         printf("Cannot afford phoenician\n");
                     }
                 } else if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
                     if (buildings[selectedBuildingIndex].cancelLastInQueue()) {
-                        carth_food += cost.food;
-                        carth_money += cost.money;
-                        printf("Cancelled phoenician production\n");
+                        unreserveResources(CARTHAGE, "phoenician");
+                        printf("Cancelled phoenician production (unreserved)\n");
                     }
                 }
             }
@@ -899,18 +1180,24 @@ void DrawUnitOrderPanel() {
             if (CheckCollisionPointRec(mousePos, slaveButton)) {
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                     if (canAffordUnit && canProduce) {
-                        if (buildings[selectedBuildingIndex].startProduction("slave")) {
-                            spendResources(ROME, "slave");
-                            printf("Started producing slave\n");
+                        bool shouldPayNow = false;
+                        if (buildings[selectedBuildingIndex].startProduction("slave", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(ROME, "slave");
+                                spendResources(ROME, "slave");
+                                printf("Started producing slave (paid now)\n");
+                            } else {
+                                reserveResources(ROME, "slave");
+                                printf("Queued slave (reserved resources)\n");
+                            }
                         }
                     } else {
                         printf("Cannot afford slave\n");
                     }
                 } else if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
                     if (buildings[selectedBuildingIndex].cancelLastInQueue()) {
-                        rome_food += cost.food;
-                        rome_money += cost.money;
-                        printf("Cancelled slave production\n");
+                        unreserveResources(ROME, "slave");
+                        printf("Cancelled slave production (unreserved)\n");
                     }
                 }
             }
@@ -1041,14 +1328,13 @@ void HandleClicks() {
                 bool foundResource = false;
                 for (int i = 0; i < resources.size(); i++) {
                     if (!resources[i].depleted && resources[i].isClicked(mousePos)) {
-                        // Знаходимо найближчу будівлю для здачі ресурсів
+                        // Знаходимо найближчий КВЕСТОРІУМ для здачі ресурсів
                         int nearestBuildingX = -1;
                         int nearestBuildingY = -1;
                         float minDist = 999999.0f;
                         
                         for (const auto& building : buildings) {
-                            if (building.faction == playerFaction && 
-                                (building.type == HQ_ROME || building.type == HQ_CARTHAGE || building.type == QUESTORIUM_ROME)) {
+                            if (building.faction == playerFaction && building.type == QUESTORIUM_ROME) {
                                 float dist = sqrt(pow(resources[i].x - building.x, 2) + pow(resources[i].y - building.y, 2));
                                 if (dist < minDist) {
                                     minDist = dist;
@@ -1058,11 +1344,30 @@ void HandleClicks() {
                             }
                         }
                         
+                        // Якщо не знайшли квесторіум, шукаємо HQ
+                        if (nearestBuildingX == -1) {
+                            for (const auto& building : buildings) {
+                                if (building.faction == playerFaction && 
+                                    (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
+                                    float dist = sqrt(pow(resources[i].x - building.x, 2) + pow(resources[i].y - building.y, 2));
+                                    if (dist < minDist) {
+                                        minDist = dist;
+                                        nearestBuildingX = building.x + 40;
+                                        nearestBuildingY = building.y + 30;
+                                    }
+                                }
+                            }
+                        }
+                        
                         // Відправляємо збирачів до ресурсу з призначенням
                         for (auto& unit : units) {
                             if (unit.selected && unit.faction == playerFaction && unit.can_harvest) {
-                                unit.assignResource(resources[i].x + 20, resources[i].y + 20, 
-                                                  nearestBuildingX, nearestBuildingY);
+                                if (nearestBuildingX != -1) {
+                                    unit.assignResource(resources[i].x + 20, resources[i].y + 20, 
+                                                      nearestBuildingX, nearestBuildingY);
+                                    printf("Slave assigned to resource at (%d, %d), dropoff at (%d, %d)\n", 
+                                           resources[i].x + 20, resources[i].y + 20, nearestBuildingX, nearestBuildingY);
+                                }
                             }
                         }
                         foundResource = true;
@@ -1072,15 +1377,23 @@ void HandleClicks() {
                 
                 // Якщо не клікнули по ресурсу або ворогу, звичайний рух
                 if (!foundResource) {
-                    for (auto& unit : units) {
-                        if (unit.selected && unit.faction == playerFaction) {
-                            unit.moveTo((int)mousePos.x, (int)mousePos.y);
-                            unit.target_unit_id = -1; // Скидаємо ціль атаки
+                    // Використовуємо pathfinding для руху
+                    for (int i = 0; i < units.size(); i++) {
+                        if (units[i].selected && units[i].faction == playerFaction) {
+                            // Запитуємо шлях через pathfinding manager
+                            Vector2 start = {(float)units[i].x, (float)units[i].y};
+                            Vector2 goal = {mousePos.x, mousePos.y};
+                            pathfindingManager.requestPath(i, start, goal, 1.0f);
+                            
+                            units[i].target_unit_id = -1; // Скидаємо ціль атаки
                             // Скидаємо призначений ресурс при ручному русі
-                            if (unit.can_harvest) {
-                                unit.assigned_resource_x = -1;
-                                unit.assigned_resource_y = -1;
+                            if (units[i].can_harvest) {
+                                units[i].assigned_resource_x = -1;
+                                units[i].assigned_resource_y = -1;
                             }
+                            
+                            printf("[PATHFINDING] Requested path for unit %d from (%d,%d) to (%.0f,%.0f)\n", 
+                                   i, units[i].x, units[i].y, mousePos.x, mousePos.y);
                         }
                     }
                 }
@@ -1102,6 +1415,34 @@ void DrawGame() {
             SwitchMusic(MUSIC_MENU);
         }
         return;
+    }
+    
+    // Оновлення pathfinding manager
+    pathfindingManager.update(GetFrameTime());
+    
+    // Перевіряємо чи є готові шляхи для юнітів
+    for (int i = 0; i < units.size(); i++) {
+        std::vector<Vector2> path;
+        if (pathfindingManager.getPath(i, path)) {
+            if (!path.empty()) {
+                units[i].setPath(path);
+                printf("[PATHFINDING] Unit %d received path with %d waypoints\n", i, (int)path.size());
+            } else {
+                printf("[PATHFINDING] Unit %d received empty path - destination unreachable\n", i);
+            }
+        }
+        
+        // Якщо юніт застряг і очистив шлях, але все ще хоче рухатися
+        if (units[i].is_moving && !units[i].hasPath() && units[i].usePathfinding) {
+            // Автоматично запитуємо новий шлях до останньої цілі
+            if (units[i].target_x != units[i].x || units[i].target_y != units[i].y) {
+                Vector2 start = {(float)units[i].x, (float)units[i].y};
+                Vector2 goal = {(float)units[i].target_x, (float)units[i].target_y};
+                pathfindingManager.requestPath(i, start, goal, 1.0f);
+                printf("[PATHFINDING] Auto-requesting new path for stuck unit %d from (%d,%d) to (%d,%d)\n", 
+                       i, units[i].x, units[i].y, units[i].target_x, units[i].target_y);
+            }
+        }
     }
     
     // Обробка введення
@@ -1129,7 +1470,7 @@ void DrawGame() {
         // Оновлюємо юніт
         units[i].update();
         
-        // Перевіряємо колізії з будівлями
+        // Проста перевірка колізій з будівлями (відкат позиції)
         Rectangle unitRect = {(float)units[i].x - 8, (float)units[i].y - 8, 16, 16};
         bool hasCollision = false;
         
@@ -1140,24 +1481,10 @@ void DrawGame() {
             }
         }
         
-        // Перевіряємо колізії з іншими юнітами
-        if (!hasCollision) {
-            for (int j = 0; j < units.size(); j++) {
-                if (i != j) {
-                    float distance = sqrt(pow(units[i].x - units[j].x, 2) + pow(units[i].y - units[j].y, 2));
-                    if (distance < 16) { // Радіус колізії
-                        hasCollision = true;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Якщо є колізія, повертаємо юніт на стару позицію
+        // Якщо є колізія з будівлею, повертаємо на стару позицію
         if (hasCollision) {
             units[i].x = old_x;
             units[i].y = old_y;
-            units[i].is_moving = false; // Зупиняємо рух
         }
         
         // Бойова логіка - пошук ворогів поблизу
@@ -1174,21 +1501,24 @@ void DrawGame() {
         }
     }
     
-    // Функція перевірки колізій для юнітів (не використовується зараз)
-    auto canUnitMoveTo = [](int new_x, int new_y) -> bool {
-        Rectangle unitRect = {(float)new_x - 8, (float)new_y - 8, 16, 16};
-        for (const auto& building : buildings) {
-            if (CheckCollisionRecs(unitRect, building.getRect())) {
-                return false;
-            }
-        }
-        return true;
-    };
-    
     // Оновлення будівель та виробництва
     float deltaTime = GetFrameTime();
     for (auto& building : buildings) {
-        building.updateProduction(deltaTime);
+        std::string startedUnit = "";
+        std::string completedUnit = "";
+        building.updateProduction(deltaTime, startedUnit, completedUnit);
+        
+        // Якщо почався новий юніт з черги - витратити ресурси
+        if (!startedUnit.empty()) {
+            spendResources(building.faction, startedUnit);
+            printf("Started producing %s from queue (paid now)\n", startedUnit.c_str());
+        }
+        
+        // Якщо завершився юніт - створити його
+        if (!completedUnit.empty()) {
+            SpawnUnit(building, completedUnit);
+            printf("Completed producing %s\n", completedUnit.c_str());
+        }
         
         // AI для ворожих будівель
         if (building.faction != playerFaction && !building.is_producing) {
@@ -1201,45 +1531,137 @@ void DrawGame() {
                 
                 if (building.type == BARRACKS_ROME) {
                     if (canAfford(building.faction, "legionary")) {
-                        if (building.startProduction("legionary")) {
-                            spendResources(building.faction, "legionary");
+                        bool shouldPayNow = false;
+                        if (building.startProduction("legionary", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "legionary");
+                                spendResources(building.faction, "legionary");
+                            } else {
+                                reserveResources(building.faction, "legionary");
+                            }
                         }
                     }
                 } else if (building.type == BARRACKS_CARTHAGE) {
                     if (canAfford(building.faction, "phoenician")) {
-                        if (building.startProduction("phoenician")) {
-                            spendResources(building.faction, "phoenician");
+                        bool shouldPayNow = false;
+                        if (building.startProduction("phoenician", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "phoenician");
+                                spendResources(building.faction, "phoenician");
+                            } else {
+                                reserveResources(building.faction, "phoenician");
+                            }
                         }
                     }
                 } else if (building.type == HQ_CARTHAGE) {
                     if (canAfford(building.faction, "phoenician")) {
-                        if (building.startProduction("phoenician")) {
-                            spendResources(building.faction, "phoenician");
+                        bool shouldPayNow = false;
+                        if (building.startProduction("phoenician", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "phoenician");
+                                spendResources(building.faction, "phoenician");
+                            } else {
+                                reserveResources(building.faction, "phoenician");
+                            }
                         }
                     }
                 }
             }
         }
         
-        // Перевірка завершення виробництва
-        if (building.isProductionComplete()) {
-            std::string unitType = building.getProducedUnit();
-            SpawnUnit(building, unitType);
+        // AI для ворожих будівель
+        if (building.faction != playerFaction && !building.is_producing) {
+            // Простий AI: виробляти юніти кожні 10 секунд
+            static float ai_building_timer = 0.0f;
+            ai_building_timer += deltaTime;
+            
+            if (ai_building_timer >= 10.0f) {
+                ai_building_timer = 0.0f;
+                
+                if (building.type == BARRACKS_ROME) {
+                    if (canAfford(building.faction, "legionary")) {
+                        bool shouldPayNow = false;
+                        if (building.startProduction("legionary", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "legionary");
+                                spendResources(building.faction, "legionary");
+                            } else {
+                                reserveResources(building.faction, "legionary");
+                            }
+                        }
+                    }
+                } else if (building.type == BARRACKS_CARTHAGE) {
+                    if (canAfford(building.faction, "phoenician")) {
+                        bool shouldPayNow = false;
+                        if (building.startProduction("phoenician", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "phoenician");
+                                spendResources(building.faction, "phoenician");
+                            } else {
+                                reserveResources(building.faction, "phoenician");
+                            }
+                        }
+                    }
+                } else if (building.type == HQ_CARTHAGE) {
+                    if (canAfford(building.faction, "phoenician")) {
+                        bool shouldPayNow = false;
+                        if (building.startProduction("phoenician", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "phoenician");
+                                spendResources(building.faction, "phoenician");
+                            } else {
+                                reserveResources(building.faction, "phoenician");
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     
-    // HUD - ресурси
-    DrawRectangle(0, 0, 1434, 80, {0, 0, 0, 180}); // Оновлено для нового розміру вікна
-    
-    // Ресурси гравця
-    if (playerFaction == ROME) {
-        DrawText(TextFormat("ROME - Food: %d | Money: %d", rome_food, rome_money), 
-                 10, 10, 16, WHITE);
-        DrawText("Your faction", 10, 30, 14, LIGHTGRAY);
+    // HUD - панель ресурсів з текстурою
+    if (resourcePanel.id > 0) {
+        // Малюємо панель ресурсів зверху по центру
+        float panelX = (1434 - resourcePanel.width) / 2.0f;
+        DrawTexture(resourcePanel, (int)panelX, 10, WHITE);
+        
+        // Малюємо значення ресурсів на панелі
+        if (playerFaction == ROME) {
+            int available_food = rome_food - rome_food_reserved;
+            int available_money = rome_money - rome_money_reserved;
+            
+            // Позиції для тексту (підлаштовуємо під панель)
+            // Ліва частина панелі - їжа (амфора) - приблизно на 1/4 ширини панелі
+            DrawText(TextFormat("%d", available_food), (int)panelX + 250, 50, 24, {255, 255, 255, 255});
+            
+            // Права частина панелі - гроші (монета) - приблизно на 3/4 ширини панелі
+            DrawText(TextFormat("%d", available_money), (int)panelX + 750, 50, 24, {255, 255, 255, 255});
+        } else {
+            int available_food = carth_food - carth_food_reserved;
+            int available_money = carth_money - carth_money_reserved;
+            
+            DrawText(TextFormat("%d", available_food), (int)panelX + 250, 50, 24, {255, 255, 255, 255});
+            DrawText(TextFormat("%d", available_money), (int)panelX + 750, 50, 24, {255, 255, 255, 255});
+        }
     } else {
-        DrawText(TextFormat("CARTHAGE - Food: %d | Money: %d", carth_food, carth_money), 
-                 10, 10, 16, ORANGE);
-        DrawText("Your faction", 10, 30, 14, LIGHTGRAY);
+        // Fallback якщо панель не завантажилась
+        DrawRectangle(0, 0, 1434, 80, {0, 0, 0, 180});
+        
+        if (playerFaction == ROME) {
+            int available_food = rome_food - rome_food_reserved;
+            int available_money = rome_money - rome_money_reserved;
+            DrawText(TextFormat("ROME - Food: %d (%d) | Money: %d (%d)", 
+                     available_food, rome_food, available_money, rome_money), 
+                     10, 10, 16, WHITE);
+            DrawText("Your faction (available/total)", 10, 30, 14, LIGHTGRAY);
+        } else {
+            int available_food = carth_food - carth_food_reserved;
+            int available_money = carth_money - carth_money_reserved;
+            DrawText(TextFormat("CARTHAGE - Food: %d (%d) | Money: %d (%d)", 
+                     available_food, carth_food, available_money, carth_money), 
+                     10, 10, 16, ORANGE);
+            DrawText("Your faction (available/total)", 10, 30, 14, LIGHTGRAY);
+        }
     }
     
     // Малювання всіх будівель
@@ -1359,6 +1781,53 @@ int main() {
     // Завантаження фону меню
     menuBackground = LoadTexture("assets/Background.png");
     
+    // Завантаження фону вибору фракції
+    factionBackground = LoadTexture("assets/Background2.png");
+    
+    // Завантаження логотипу
+    gameLogo = LoadTexture("assets/sprites/Logo.png");
+    if (gameLogo.id > 0) {
+        logoLoaded = true;
+        printf("[TEXTURE] Logo loaded: %dx%d\n", gameLogo.width, gameLogo.height);
+    } else {
+        printf("[TEXTURE] Warning: Logo not loaded!\n");
+    }
+    
+    // Завантаження кастомного шрифту
+    customFont = LoadFontEx("assets/fonts/GameFont.ttf", 48, 0, 0);
+    if (customFont.texture.id > 0) {
+        fontLoaded = true;
+        printf("[FONT] Custom font loaded successfully\n");
+    } else {
+        printf("[FONT] Warning: Custom font not loaded, using default\n");
+    }
+    
+    // Завантаження текстур UI
+    cursorIdle = LoadTexture("assets/sprites/Cursor_idle.png");
+    cursorHover = LoadTexture("assets/sprites/Cursor_hover.png");
+    cursorClick = LoadTexture("assets/sprites/Cursor_click.png");
+    resourcePanel = LoadTexture("assets/sprites/ResourcePanel.png");
+    buttonBase = LoadTexture("assets/sprites/Button_base.png");
+    buttonHover = LoadTexture("assets/sprites/Button_hover_base.png");
+    
+    // Завантаження текстур для динамічних кнопок
+    DynamicButton::LoadTextures();
+    
+    // Перевірка завантаження текстур (виводимо в файл для дебагу)
+    FILE* debugFile = fopen("texture_debug.txt", "w");
+    if (debugFile) {
+        fprintf(debugFile, "Cursor Idle ID: %d, Size: %dx%d\n", cursorIdle.id, cursorIdle.width, cursorIdle.height);
+        fprintf(debugFile, "Cursor Hover ID: %d, Size: %dx%d\n", cursorHover.id, cursorHover.width, cursorHover.height);
+        fprintf(debugFile, "Cursor Click ID: %d, Size: %dx%d\n", cursorClick.id, cursorClick.width, cursorClick.height);
+        fprintf(debugFile, "Resource Panel ID: %d, Size: %dx%d\n", resourcePanel.id, resourcePanel.width, resourcePanel.height);
+        fprintf(debugFile, "Button Base ID: %d, Size: %dx%d\n", buttonBase.id, buttonBase.width, buttonBase.height);
+        fprintf(debugFile, "Button Hover ID: %d, Size: %dx%d\n", buttonHover.id, buttonHover.width, buttonHover.height);
+        fclose(debugFile);
+    }
+    
+    // Приховуємо системний курсор
+    HideCursor();
+    
     // Перевірка завантаження
     if (menuMusic.frameCount > 0 && ambientMusic[0].frameCount > 0 && 
         battleMusicRome[0].frameCount > 0 && battleMusicCarthage[0].frameCount > 0) {
@@ -1420,6 +1889,19 @@ int main() {
         UnloadMusicStream(defeatMusic[1]);
     }
     UnloadTexture(menuBackground);
+    UnloadTexture(factionBackground);
+    if (logoLoaded) UnloadTexture(gameLogo);
+    if (fontLoaded) UnloadFont(customFont);
+    UnloadTexture(cursorIdle);
+    UnloadTexture(cursorHover);
+    UnloadTexture(cursorClick);
+    UnloadTexture(resourcePanel);
+    UnloadTexture(buttonBase);
+    UnloadTexture(buttonHover);
+    
+    // Вивантаження текстур динамічних кнопок
+    DynamicButton::UnloadTextures();
+    
     CloseAudioDevice();
     
     // Закриття
