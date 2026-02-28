@@ -1,0 +1,40 @@
+# Виконувані файли
+*.exe
+*.out
+*.app
+
+# Об'єктні файли
+*.o
+*.obj
+
+# Бібліотеки
+*.lib
+*.a
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Raylib
+raylib/
+
+# Тимчасові файли
+*.tmp
+*.log

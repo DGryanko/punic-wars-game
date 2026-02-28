@@ -1,0 +1,5 @@
+# MCP Server Dependencies
+mcp>=1.0.0
+
+# Optional: для розширених функцій
+requests>=2.31.0

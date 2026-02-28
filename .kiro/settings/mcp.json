@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "punic-wars-context": {
+      "command": "python",
+      "args": ["D:\\GitHub\\Game\\punic_wars_mcp.py"],
+      "env": {
+        "PYTHONPATH": "D:\\GitHub\\Game"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "get_project_context",
+        "get_game_features", 
+        "search_code",
+        "get_compilation_info"
+      ]
+    },
+    "filesystem": {
+      "command": "uvx",
+      "args": ["mcp-filesystem@latest"],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "read_file",
+        "list_directory"
+      ]
+    }
+  }
+}

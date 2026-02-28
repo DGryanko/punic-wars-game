@@ -1,0 +1,257 @@
+ТЗ: Punic Wars — Castra Mini-RTS
+1. Загальна концепція
+Назва: Punic Wars: Castra
+Жанр: міні-RTS, real-time стратегія
+Сетінг: Пунічні війни, Рим vs Карфаген
+Рушій: Raylib (C++)
+Цільовий розмір: ~50-100 МБ
+Роздільність: 1024x768
+FPS: 60
+Юніти на екрані: до 100
+
+2. Фракції
+2.1 Рим
+Особливості:
+
+Без грошей → воюють з дебафом -20% (громадянський обов'язок)
+
+Без їжі → тікають з поля бою (мораль = 0)
+
+Раби збирають ресурси
+
+2.2 Карфаген
+Особливості:
+
+Без грошей → найманці повстають (revolt = true), але продовжують воювати з дебафом -20%
+
+Без їжі → дебаф -20% (окремо від revolt)
+
+Раби збирають ресурси
+
+cpp
+struct FactionState {
+    bool has_food = true;
+    bool has_money = true;
+    bool revolt = false;
+    bool fleeing = false;
+    float combat_modifier = 1.0f;
+
+    void update(Faction f) {
+        combat_modifier = 1.0f;
+        revolt = false;
+        fleeing = false;
+
+        if (f == ROME) {
+            if (!has_food) { fleeing = true; combat_modifier = 0.0f; return; }
+            if (!has_money) combat_modifier = 0.8f;
+        }
+
+        if (f == CARTHAGE) {
+            if (!has_money) { revolt = true; combat_modifier = 0.8f; }
+            if (!has_food) combat_modifier *= 0.8f; // стекується окремо
+        }
+    }
+};
+3. Ресурси
+Ресурс	Рим	Карфаген
+Їжа	Квесторій (сховище)	Сховище їжі (окреме)
+Гроші	Квесторій (сховище)	Головне шатро (сховище)
+3.1 Джерела їжі
+Полювання (раби/робітники) — +3/сек
+
+Рибалка — +2/сек
+
+Збирання — +1/сек
+
+Землеробство/жнива — +4/сек (найефективніше)
+
+Ринок (тенторіум) — купівля за гроші
+
+3.2 Джерела грошей
+Ринок — обмін їжі 2:1
+
+Напади на каравани — разовий бонус
+
+Напади на вілли/поселення — разовий бонус
+
+4. Будівлі
+4.1 Рим
+Будівля	Тип	Функція	Вартість	Час будівництва
+Преторій	HQ (стартова)	Командування, +1 мораль/хв	—	Стартова
+Квесторій	Сховище	Їжа макс 1000, Гроші макс 1000	50їжі / 50грошей	30 сек
+Контуберній	Прямокутний шатер (папіліо)	Spawn 8 легіонерів/велітів	80їжі / 60грошей	20 сек
+Тенторіум торговця	Ринок	Купівля/продаж їжі та грошей (2:1)	30їжі / 30грошей	15 сек
+4.2 Карфаген
+Будівля	Тип	Функція	Вартість	Час будівництва
+Головне шатро	HQ східний (стартова)	Командування, сховище грошей макс 1500, +2 гроші/хв	—	Стартова
+Шатер лівійців Lv1	Округлий/конічний	6 місць (фінікійці/пельтасти)	60їжі / 40грошей	25 сек
+Шатер лівійців Lv2	Покращення	8 місць	+40їжі / +30грошей	+15 сек
+Шатер лівійців Lv3	Покращення	10 місць ("покликати родичів")	+50їжі / +40грошей	+20 сек
+Загін для коней + халабуди	Відкрите/плетене	4 нумідійські вершники	100їжі / 80грошей	35 сек
+Сховище їжі	Окреме сховище	Їжа макс 800	40їжі / 20грошей	20 сек
+5. Юніти
+5.1 Рим
+Юніт	HP	Атк	Захист	Швидкість	Тип	Spawn з
+Легіонер	100	15	12	1.0	Melee (меч+щит)	Контуберній
+Веліт	70	10 (дальній)	5	1.3	Ranged (дротики)	Контуберній
+Робітник	50	3	1	1.2	Збір ресурсів	Преторій
+Раб	40	0	0	1.0	Збір ресурсів	Преторій
+5.2 Карфаген
+Юніт	HP	Атк	Захист	Швидкість	Тип	Spawn з
+Фінікієць (лінійна піхота)	90	14	10	1.0	Melee (спис+круглий щит)	Шатер лівійців
+Пельтаст	60	8 (дальній) / 4 (ближній)	3	1.4	Ranged + слабкий melee	Шатер лівійців
+Нумідієць (вершник)	80	12	6	2.5	Кавалерія, слабкий у ближньому	Загін коней
+Робітник	45	2	1	1.2	Збір ресурсів	Головне шатро
+Раб	40	0	0	1.0	Збір ресурсів	Головне шатро
+5.3 Раби (обидві нації)
+cpp
+enum SlaveTask { HUNT, FISH, GATHER, FARM, CARRY_WATER };
+
+struct Slave {
+    int x, y, hp = 40;
+    SlaveTask task;
+    Faction owner;
+    float efficiency = 0.7f;
+
+    int collectResource() {
+        switch(task) {
+            case HUNT:        return 3;
+            case FISH:        return 2;
+            case GATHER:      return 1;
+            case FARM:        return 4;
+            case CARRY_WATER: return 0; // буфер моралі гарнізону
+        }
+        return 0;
+    }
+};
+6. Умови перемоги
+Знищити HQ ворога (Преторій / Головне шатро)
+
+АБО набрати 5000 ресурсів (їжа + гроші)
+
+7. Структура проєкту (Raylib)
+text
+punic_wars/
+├── src/
+│   ├── main.cpp
+│   ├── building.h
+│   ├── unit.h
+│   ├── slave.h
+│   ├── morale.h
+│   ├── resources.h
+│   ├── combat.h
+│   └── ai.h
+├── assets/
+│   ├── sprites/
+│   │   ├── rome/
+│   │   │   ├── praetorium.png
+│   │   │   ├── quaestorium.png
+│   │   │   ├── contuberniun.png
+│   │   │   ├── tentorium.png
+│   │   │   ├── legionary.png
+│   │   │   ├── velite.png
+│   │   │   └── worker_rome.png
+│   │   └── carthage/
+│   │       ├── hq_carthage.png
+│   │       ├── tent_lv1.png
+│   │       ├── tent_lv2.png
+│   │       ├── tent_lv3.png
+│   │       ├── stable_hut.png
+│   │       ├── food_storage.png
+│   │       ├── phoenician.png
+│   │       ├── peltast.png
+│   │       ├── numidian.png
+│   │       └── worker_carthage.png
+│   ├── sounds/
+│   └── maps/
+│       └── map_01.png
+├── SDL2/ (не потрібно — тільки Raylib)
+├── CMakeLists.txt
+└── README.md
+8. Налаштування Raylib (покроково)
+Крок 1: Встановлення
+Йди на raylib.com → Download
+
+Скачай "Windows Installer" (включає MinGW + Raylib + notepad++)
+
+Встанови в C:/raylib/
+
+Крок 2: Перший запуск
+Відкрий C:/raylib/notepad++/ → New file → збережи як main.cpp:
+
+cpp
+#include "raylib.h"
+
+int main() {
+    InitWindow(1024, 768, "Punic Wars: Castra");
+    SetTargetFPS(60);
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground({34, 85, 34, 255});
+        DrawText("Punic Wars: Castra", 380, 370, 24, WHITE);
+        EndDrawing();
+    }
+    CloseWindow();
+    return 0;
+}
+Компіляція (MinGW terminal):
+
+bash
+g++ main.cpp -o punic_wars.exe -lraylib -lopengl32 -lgdi32 -lwinmm
+Крок 3: Підключення модулів
+cpp
+// main.cpp — повний старт
+#include "raylib.h"
+#include "building.h"
+#include "unit.h"
+#include "morale.h"
+#include "resources.h"
+
+int rome_food = 200, rome_money = 100;
+int carth_food = 150, carth_money = 200;
+
+int main() {
+    InitWindow(1024, 768, "Punic Wars: Castra");
+    SetTargetFPS(60);
+
+    FactionState rome_state, carth_state;
+
+    while (!WindowShouldClose()) {
+        // Оновлення стану
+        rome_state.has_food   = rome_food > 0;
+        rome_state.has_money  = rome_money > 0;
+        rome_state.update(ROME);
+
+        carth_state.has_food  = carth_food > 0;
+        carth_state.has_money = carth_money > 0;
+        carth_state.update(CARTHAGE);
+
+        BeginDrawing();
+        ClearBackground({34, 85, 34, 255});
+
+        // HUD
+        DrawText(TextFormat("ROME | Food: %d | Money: %d | Combat: %.0f%%",
+            rome_food, rome_money, rome_state.combat_modifier * 100),
+            10, 10, 16, WHITE);
+        DrawText(TextFormat("CARTHAGE | Food: %d | Money: %d | Revolt: %s | Combat: %.0f%%",
+            carth_food, carth_money,
+            carth_state.revolt ? "YES" : "NO",
+            carth_state.combat_modifier * 100),
+            10, 30, 16, ORANGE);
+
+        EndDrawing();
+    }
+    CloseWindow();
+    return 0;
+}
+9. Рекомендації для Kiro.dev
+Kiro.dev — AI-асистент для генерації коду. Давай йому по одному модулю за раз:
+
+Черга	Промпт для Kiro
+1	"Create building.h for Raylib RTS with BuildingType enum: HQ, STORAGE, BARRACKS, MARKET for ROME and HQ_CARTHAGE, TENT_LV1/2/3, STABLE, FOOD_STORAGE for CARTHAGE. Include upgrade() and getCapacity() methods."
+2	"Create unit.h with Unit struct: legionary, velite, worker for ROME; phoenician, peltast, numidian, worker for CARTHAGE. Include HP/ATK/DEF/speed stats and ranged bool."
+3	"Create slave.h with Slave struct, SlaveTask enum (HUNT/FISH/GATHER/FARM/CARRY_WATER), collectResource() returning food per second."
+4	"Create morale.h with FactionState. ROME: no food = flee (modifier 0.0), no money = -20% (modifier 0.8). CARTHAGE: no money = revolt + -20%, no food = separate -20% that stacks."
+5	"Create resources.h with ResourceManager: tick-based food generation from slaves by task, market exchange (2 food = 1 money), passive money generation for Carthage HQ (+2/min)."
+6	"Create combat.h: attack formula = (attacker.atk - defender.def) * faction_combat_modifier. Add flee logic for ROME when fleeing=true, revolt flag display for CARTHAGE."
+7	"Create basic AI worker pathfinding: slave moves to nearest resource node (hunt/fish/gather/farm), collects, returns to storage building."
