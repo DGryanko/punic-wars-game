@@ -7,10 +7,20 @@
 // Стани гри
 enum GameState {
     MENU,
+    SETTINGS,
     FACTION_SELECT,
     PLAYING,
     EXIT
 };
+
+// Налаштування звуку
+struct AudioSettings {
+    float musicVolume = 0.5f;      // Музика (0.0 - 1.0)
+    float ambientVolume = 0.5f;    // Середовище (0.0 - 1.0)
+    float effectsVolume = 0.5f;    // Ефекти (0.0 - 1.0)
+};
+
+AudioSettings audioSettings;
 
 // Глобальні змінні
 GameState currentState = MENU;
@@ -19,6 +29,14 @@ int rome_food = 200;
 int rome_money = 100;
 int carth_food = 150;
 int carth_money = 200;
+
+// Музика та звуки
+Music menuMusic;
+Music battleMusicRome;
+Music battleMusicCarthage;
+Music currentBattleMusic;
+Texture2D menuBackground;
+bool audioInitialized = false;
 
 // Списки об'єктів
 std::vector<Building> buildings;
@@ -299,9 +317,90 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     units.push_back(newUnit);
 }
 
+// Функція для малювання меню налаштувань
+void DrawSettings() {
+    ClearBackground(BLACK);
+    
+    // Заголовок
+    DrawText("SETTINGS", 450, 100, 40, GOLD);
+    
+    // Позиції повзунків
+    int sliderX = 400;
+    int sliderWidth = 400;
+    int sliderHeight = 20;
+    
+    // Повзунок музики
+    DrawText("Music Volume:", 200, 220, 20, WHITE);
+    Rectangle musicSlider = {(float)sliderX, 220, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(musicSlider, DARKGRAY);
+    DrawRectangle(sliderX, 220, (int)(sliderWidth * audioSettings.musicVolume), sliderHeight, GREEN);
+    DrawText(TextFormat("%.0f%%", audioSettings.musicVolume * 100), 820, 220, 20, WHITE);
+    
+    // Повзунок середовища
+    DrawText("Ambient Volume:", 200, 300, 20, WHITE);
+    Rectangle ambientSlider = {(float)sliderX, 300, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(ambientSlider, DARKGRAY);
+    DrawRectangle(sliderX, 300, (int)(sliderWidth * audioSettings.ambientVolume), sliderHeight, BLUE);
+    DrawText(TextFormat("%.0f%%", audioSettings.ambientVolume * 100), 820, 300, 20, WHITE);
+    
+    // Повзунок ефектів
+    DrawText("Effects Volume:", 200, 380, 20, WHITE);
+    Rectangle effectsSlider = {(float)sliderX, 380, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(effectsSlider, DARKGRAY);
+    DrawRectangle(sliderX, 380, (int)(sliderWidth * audioSettings.effectsVolume), sliderHeight, RED);
+    DrawText(TextFormat("%.0f%%", audioSettings.effectsVolume * 100), 820, 380, 20, WHITE);
+    
+    // Кнопка назад
+    Rectangle backButton = {450, 500, 120, 40};
+    Vector2 mousePos = GetMousePosition();
+    bool backHover = CheckCollisionPointRec(mousePos, backButton);
+    DrawRectangleRec(backButton, backHover ? DARKGRAY : GRAY);
+    DrawText("BACK", 480, 510, 16, WHITE);
+    
+    // Обробка повзунків
+    if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+        if (CheckCollisionPointRec(mousePos, musicSlider)) {
+            audioSettings.musicVolume = (mousePos.x - sliderX) / sliderWidth;
+            if (audioSettings.musicVolume < 0) audioSettings.musicVolume = 0;
+            if (audioSettings.musicVolume > 1) audioSettings.musicVolume = 1;
+            if (audioInitialized) {
+                SetMusicVolume(menuMusic, audioSettings.musicVolume);
+                SetMusicVolume(battleMusicRome, audioSettings.musicVolume);
+                SetMusicVolume(battleMusicCarthage, audioSettings.musicVolume);
+            }
+        }
+        if (CheckCollisionPointRec(mousePos, ambientSlider)) {
+            audioSettings.ambientVolume = (mousePos.x - sliderX) / sliderWidth;
+            if (audioSettings.ambientVolume < 0) audioSettings.ambientVolume = 0;
+            if (audioSettings.ambientVolume > 1) audioSettings.ambientVolume = 1;
+        }
+        if (CheckCollisionPointRec(mousePos, effectsSlider)) {
+            audioSettings.effectsVolume = (mousePos.x - sliderX) / sliderWidth;
+            if (audioSettings.effectsVolume < 0) audioSettings.effectsVolume = 0;
+            if (audioSettings.effectsVolume > 1) audioSettings.effectsVolume = 1;
+        }
+    }
+    
+    // Обробка кнопки назад
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && backHover) {
+        currentState = MENU;
+    }
+    
+    // Інструкції
+    DrawText("Adjust audio settings", 430, 450, 16, GRAY);
+}
+
 // Функція для малювання меню
 void DrawMenu() {
     ClearBackground(BLACK);
+    
+    // Малюємо фон якщо завантажений
+    if (menuBackground.id > 0) {
+        DrawTexture(menuBackground, 0, 0, WHITE);
+    }
+    
+    // Напівпрозорий оверлей для кращої читабельності
+    DrawRectangle(0, 0, 1434, 1075, {0, 0, 0, 150});
     
     // Заголовок
     DrawText("PUNIC WARS: CASTRA", 280, 200, 40, GOLD);
@@ -309,25 +408,32 @@ void DrawMenu() {
     
     // Кнопки меню
     Rectangle startButton = {400, 350, 200, 50};
-    Rectangle exitButton = {400, 420, 200, 50};
+    Rectangle settingsButton = {400, 420, 200, 50};
+    Rectangle exitButton = {400, 490, 200, 50};
     
     // Перевірка наведення миші
     Vector2 mousePos = GetMousePosition();
     bool startHover = CheckCollisionPointRec(mousePos, startButton);
+    bool settingsHover = CheckCollisionPointRec(mousePos, settingsButton);
     bool exitHover = CheckCollisionPointRec(mousePos, exitButton);
     
     // Малювання кнопок
     DrawRectangleRec(startButton, startHover ? DARKGREEN : GREEN);
+    DrawRectangleRec(settingsButton, settingsHover ? DARKBLUE : BLUE);
     DrawRectangleRec(exitButton, exitHover ? MAROON : RED);
     
     // Текст кнопок
     DrawText("START GAME", 450, 365, 20, WHITE);
-    DrawText("EXIT", 480, 435, 20, WHITE);
+    DrawText("SETTINGS", 460, 435, 20, WHITE);
+    DrawText("EXIT", 480, 505, 20, WHITE);
     
     // Обробка кліків
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
         if (startHover) {
             currentState = FACTION_SELECT; // Переходимо до вибору фракції
+        }
+        if (settingsHover) {
+            currentState = SETTINGS;
         }
         if (exitHover) {
             currentState = EXIT;
@@ -335,8 +441,8 @@ void DrawMenu() {
     }
     
     // Інструкції
-    DrawText("Rome vs Carthage", 430, 550, 16, GRAY);
-    DrawText("Press ESC to exit", 440, 580, 14, DARKGRAY);
+    DrawText("Rome vs Carthage", 430, 600, 16, GRAY);
+    DrawText("Press ESC to exit", 440, 630, 14, DARKGRAY);
 }
 
 // Функція для екрану вибору фракції
@@ -381,6 +487,13 @@ void DrawFactionSelect() {
             InitBuildings();
             InitResources();
             units.clear();
+            // Зупиняємо меню музику і запускаємо бойову для Риму
+            if (audioInitialized) {
+                StopMusicStream(menuMusic);
+                currentBattleMusic = battleMusicRome;
+                PlayMusicStream(currentBattleMusic);
+                SetMusicVolume(currentBattleMusic, audioSettings.musicVolume);
+            }
         }
         if (carthageHover) {
             playerFaction = CARTHAGE;
@@ -388,6 +501,13 @@ void DrawFactionSelect() {
             InitBuildings();
             InitResources();
             units.clear();
+            // Зупиняємо меню музику і запускаємо бойову для Карфагену
+            if (audioInitialized) {
+                StopMusicStream(menuMusic);
+                currentBattleMusic = battleMusicCarthage;
+                PlayMusicStream(currentBattleMusic);
+                SetMusicVolume(currentBattleMusic, audioSettings.musicVolume);
+            }
         }
         if (backHover) {
             currentState = MENU;
@@ -715,6 +835,18 @@ void DrawGame() {
     // Зелений фон карти
     ClearBackground({34, 85, 34, 255});
     
+    // Обробка ESC - повернення в меню
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        currentState = MENU;
+        // Зупиняємо бойову музику і запускаємо меню музику
+        if (audioInitialized) {
+            StopMusicStream(currentBattleMusic);
+            PlayMusicStream(menuMusic);
+            SetMusicVolume(menuMusic, audioSettings.musicVolume);
+        }
+        return;
+    }
+    
     // Обробка введення
     HandleClicks();
     
@@ -949,13 +1081,45 @@ int main() {
     InitWindow(screenWidth, screenHeight, "Punic Wars: Castra");
     SetTargetFPS(60);
     
+    // Ініціалізація аудіо
+    InitAudioDevice();
+    
+    // Завантаження музики
+    menuMusic = LoadMusicStream("assets/sounds/Punic wars_ Castra.mp3");
+    battleMusicRome = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Rome.mp3");
+    battleMusicCarthage = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Carthage.mp3");
+    
+    // Завантаження фону меню
+    menuBackground = LoadTexture("assets/Background.png");
+    
+    // Перевірка завантаження
+    if (menuMusic.frameCount > 0 && battleMusicRome.frameCount > 0 && battleMusicCarthage.frameCount > 0) {
+        audioInitialized = true;
+        SetMusicVolume(menuMusic, audioSettings.musicVolume);
+        SetMusicVolume(battleMusicRome, audioSettings.musicVolume);
+        SetMusicVolume(battleMusicCarthage, audioSettings.musicVolume);
+        PlayMusicStream(menuMusic); // Запускаємо меню музику
+    }
+    
     // Головний цикл гри
     while (!WindowShouldClose() && currentState != EXIT) {
+        // Оновлюємо музику
+        if (audioInitialized) {
+            if (currentState == MENU || currentState == SETTINGS || currentState == FACTION_SELECT) {
+                UpdateMusicStream(menuMusic);
+            } else if (currentState == PLAYING) {
+                UpdateMusicStream(currentBattleMusic);
+            }
+        }
+        
         BeginDrawing();
         
         switch (currentState) {
             case MENU:
                 DrawMenu();
+                break;
+            case SETTINGS:
+                DrawSettings();
                 break;
             case FACTION_SELECT:
                 DrawFactionSelect();
@@ -969,6 +1133,15 @@ int main() {
         
         EndDrawing();
     }
+    
+    // Вивантаження ресурсів
+    if (audioInitialized) {
+        UnloadMusicStream(menuMusic);
+        UnloadMusicStream(battleMusicRome);
+        UnloadMusicStream(battleMusicCarthage);
+    }
+    UnloadTexture(menuBackground);
+    CloseAudioDevice();
     
     // Закриття
     CloseWindow();
