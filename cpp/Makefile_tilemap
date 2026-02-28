@@ -1,0 +1,41 @@
+# Makefile для генератора ізометричної тайлової мапи
+
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+INCLUDES = -Isrc
+LIBS = -lraylib -lopengl32 -lgdi32 -lwinmm
+
+# Вихідні файли
+TILEMAP_SOURCES = src/tilemap/tilemap.cpp \
+                  src/tilemap/noise.cpp \
+                  src/tilemap/map_generator.cpp \
+                  src/tilemap/isometric_renderer.cpp \
+                  src/tilemap/map_serializer.cpp
+
+TILEMAP_OBJECTS = $(TILEMAP_SOURCES:.cpp=.o)
+
+# Тестовий виконуваний файл
+TEST_TARGET = tilemap_test.exe
+
+.PHONY: all clean test
+
+all: $(TEST_TARGET)
+
+$(TEST_TARGET): src/tilemap_test.cpp $(TILEMAP_OBJECTS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^ $(LIBS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
+clean:
+	del /Q src\tilemap\*.o $(TEST_TARGET) 2>nul || echo Cleaned
+
+# Залежності
+src/tilemap/tilemap.o: src/tilemap/tilemap.cpp src/tilemap/tilemap.h src/tilemap/terrain.h src/tilemap/coordinates.h
+src/tilemap/noise.o: src/tilemap/noise.cpp src/tilemap/noise.h
+src/tilemap/map_generator.o: src/tilemap/map_generator.cpp src/tilemap/map_generator.h src/tilemap/tilemap.h src/tilemap/noise.h
+src/tilemap/isometric_renderer.o: src/tilemap/isometric_renderer.cpp src/tilemap/isometric_renderer.h src/tilemap/tilemap.h src/tilemap/coordinates.h
+src/tilemap/map_serializer.o: src/tilemap/map_serializer.cpp src/tilemap/map_serializer.h src/tilemap/tilemap.h
