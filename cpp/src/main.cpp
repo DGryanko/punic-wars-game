@@ -240,10 +240,12 @@ void ProcessResourceHarvesting() {
                                 int harvestAmount = 2; // 2 одиниці за кадр
                                 int harvested = resource.harvest(harvestAmount);
                                 
-                                if (resource.type == FOOD_SOURCE) {
-                                    unit.addResources(harvested, 0);
-                                } else if (resource.type == GOLD_SOURCE) {
-                                    unit.addResources(0, harvested);
+                                if (harvested > 0) {
+                                    if (resource.type == FOOD_SOURCE) {
+                                        unit.addResources(harvested, 0);
+                                    } else if (resource.type == GOLD_SOURCE) {
+                                        unit.addResources(0, harvested);
+                                    }
                                 }
                                 
                                 break;
@@ -252,13 +254,13 @@ void ProcessResourceHarvesting() {
                     }
                 }
             }
-            // Старий код для рабів без призначеної точки (ручне керування)
+            // Старий код для рабів без призначеної точки (ручне керування або після скидання)
             else if (!unit.is_moving) {
-                // Перевіряємо, чи юніт поруч з ресурсом
+                // Перевіряємо, чи юніт поруч з ресурсом - ЗАВЖДИ збирати якщо є місце
                 for (auto& resource : resources) {
-                    if (!resource.depleted) {
+                    if (!resource.depleted && unit.canCarryMore()) {
                         float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + pow(unit.y - (resource.y + 20), 2));
-                        if (distance < 30 && unit.canCarryMore()) {
+                        if (distance < 40) { // Збільшено радіус з 30 до 40
                             // Почати збір
                             unit.startHarvesting();
                             
@@ -266,10 +268,12 @@ void ProcessResourceHarvesting() {
                             int harvestAmount = 2; // 2 одиниці за кадр
                             int harvested = resource.harvest(harvestAmount);
                             
-                            if (resource.type == FOOD_SOURCE) {
-                                unit.addResources(harvested, 0);
-                            } else if (resource.type == GOLD_SOURCE) {
-                                unit.addResources(0, harvested);
+                            if (harvested > 0) {
+                                if (resource.type == FOOD_SOURCE) {
+                                    unit.addResources(harvested, 0);
+                                } else if (resource.type == GOLD_SOURCE) {
+                                    unit.addResources(0, harvested);
+                                }
                             }
                             
                             break;
