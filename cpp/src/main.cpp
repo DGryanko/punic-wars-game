@@ -197,51 +197,108 @@ void DrawCustomCursor() {
 // Функція для обробки збору ресурсів
 void ProcessResourceHarvesting() {
     for (auto& unit : units) {
-        if (unit.faction == playerFaction && unit.can_harvest && !unit.is_moving) {
-            // Перевіряємо, чи юніт поруч з ресурсом
-            for (auto& resource : resources) {
-                if (!resource.depleted) {
-                    float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + pow(unit.y - (resource.y + 20), 2));
-                    if (distance < 30 && unit.canCarryMore()) {
-                        // Почати збір
-                        unit.startHarvesting();
+        if (unit.faction == playerFaction && unit.can_harvest) {
+            // Якщо раб має призначену ресурсну точку
+            if (unit.hasAssignedResource()) {
+                // Якщо раб повний, йти здавати ресурси
+                if (!unit.canCarryMore() && (unit.carrying_food > 0 || unit.carrying_gold > 0)) {
+                    if (!unit.is_moving) {
+                        unit.moveTo(unit.dropoff_building_x, unit.dropoff_building_y);
+                    }
+                    
+                    // Перевірка, чи поруч з будівлею для здачі
+                    float distToBuilding = sqrt(pow(unit.x - unit.dropoff_building_x, 2) + 
+                                               pow(unit.y - unit.dropoff_building_y, 2));
+                    if (distToBuilding < 50) {
+                        // Здати ресурси
+                        int food, gold;
+                        unit.dropResources(food, gold);
                         
-                        // Збираємо ресурс
-                        int harvestAmount = 2; // 2 одиниці за кадр
-                        int harvested = resource.harvest(harvestAmount);
-                        
-                        if (resource.type == FOOD_SOURCE) {
-                            unit.addResources(harvested, 0);
-                        } else if (resource.type == GOLD_SOURCE) {
-                            unit.addResources(0, harvested);
+                        if (playerFaction == ROME) {
+                            rome_food += food;
+                            rome_money += gold;
+                        } else {
+                            carth_food += food;
+                            carth_money += gold;
                         }
                         
-                        break;
+                        // Повернутися до ресурсу
+                        unit.moveTo(unit.assigned_resource_x, unit.assigned_resource_y);
+                    }
+                }
+                // Якщо раб не повний і поруч з ресурсом, збирати
+                else if (!unit.is_moving) {
+                    for (auto& resource : resources) {
+                        if (!resource.depleted) {
+                            float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + 
+                                                pow(unit.y - (resource.y + 20), 2));
+                            if (distance < 40) {
+                                // Почати збір
+                                unit.startHarvesting();
+                                
+                                // Збираємо ресурс
+                                int harvestAmount = 2; // 2 одиниці за кадр
+                                int harvested = resource.harvest(harvestAmount);
+                                
+                                if (resource.type == FOOD_SOURCE) {
+                                    unit.addResources(harvested, 0);
+                                } else if (resource.type == GOLD_SOURCE) {
+                                    unit.addResources(0, harvested);
+                                }
+                                
+                                break;
+                            }
+                        }
                     }
                 }
             }
-            
-            // Перевіряємо, чи юніт поруч з квесторієм або HQ для здачі ресурсів
-            if (unit.carrying_food > 0 || unit.carrying_gold > 0) {
-                for (const auto& building : buildings) {
-                    if (building.faction == playerFaction && 
-                        (building.type == HQ_ROME || building.type == HQ_CARTHAGE || building.type == QUESTORIUM_ROME)) {
-                        float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
-                        if (distance < 50) {
-                            // Здати ресурси
-                            int food, gold;
-                            unit.dropResources(food, gold);
+            // Старий код для рабів без призначеної точки (ручне керування)
+            else if (!unit.is_moving) {
+                // Перевіряємо, чи юніт поруч з ресурсом
+                for (auto& resource : resources) {
+                    if (!resource.depleted) {
+                        float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + pow(unit.y - (resource.y + 20), 2));
+                        if (distance < 30 && unit.canCarryMore()) {
+                            // Почати збір
+                            unit.startHarvesting();
                             
-                            if (playerFaction == ROME) {
-                                rome_food += food;
-                                rome_money += gold;
-                            } else {
-                                carth_food += food;
-                                carth_money += gold;
+                            // Збираємо ресурс
+                            int harvestAmount = 2; // 2 одиниці за кадр
+                            int harvested = resource.harvest(harvestAmount);
+                            
+                            if (resource.type == FOOD_SOURCE) {
+                                unit.addResources(harvested, 0);
+                            } else if (resource.type == GOLD_SOURCE) {
+                                unit.addResources(0, harvested);
                             }
                             
-                            unit.stopHarvesting();
                             break;
+                        }
+                    }
+                }
+                
+                // Перевіряємо, чи юніт поруч з квесторієм або HQ для здачі ресурсів
+                if (unit.carrying_food > 0 || unit.carrying_gold > 0) {
+                    for (const auto& building : buildings) {
+                        if (building.faction == playerFaction && 
+                            (building.type == HQ_ROME || building.type == HQ_CARTHAGE || building.type == QUESTORIUM_ROME)) {
+                            float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
+                            if (distance < 50) {
+                                // Здати ресурси
+                                int food, gold;
+                                unit.dropResources(food, gold);
+                                
+                                if (playerFaction == ROME) {
+                                    rome_food += food;
+                                    rome_money += gold;
+                                } else {
+                                    carth_food += food;
+                                    carth_money += gold;
+                                }
+                                
+                                unit.stopHarvesting();
+                                break;
+                            }
                         }
                     }
                 }
@@ -823,10 +880,28 @@ void HandleClicks() {
                 bool foundResource = false;
                 for (int i = 0; i < resources.size(); i++) {
                     if (!resources[i].depleted && resources[i].isClicked(mousePos)) {
-                        // Відправляємо збирачів до ресурсу
+                        // Знаходимо найближчу будівлю для здачі ресурсів
+                        int nearestBuildingX = -1;
+                        int nearestBuildingY = -1;
+                        float minDist = 999999.0f;
+                        
+                        for (const auto& building : buildings) {
+                            if (building.faction == playerFaction && 
+                                (building.type == HQ_ROME || building.type == HQ_CARTHAGE || building.type == QUESTORIUM_ROME)) {
+                                float dist = sqrt(pow(resources[i].x - building.x, 2) + pow(resources[i].y - building.y, 2));
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    nearestBuildingX = building.x + 40;
+                                    nearestBuildingY = building.y + 30;
+                                }
+                            }
+                        }
+                        
+                        // Відправляємо збирачів до ресурсу з призначенням
                         for (auto& unit : units) {
                             if (unit.selected && unit.faction == playerFaction && unit.can_harvest) {
-                                unit.moveTo(resources[i].x + 20, resources[i].y + 20); // Центр ресурсу
+                                unit.assignResource(resources[i].x + 20, resources[i].y + 20, 
+                                                  nearestBuildingX, nearestBuildingY);
                             }
                         }
                         foundResource = true;
@@ -840,6 +915,11 @@ void HandleClicks() {
                         if (unit.selected && unit.faction == playerFaction) {
                             unit.moveTo((int)mousePos.x, (int)mousePos.y);
                             unit.target_unit_id = -1; // Скидаємо ціль атаки
+                            // Скидаємо призначений ресурс при ручному русі
+                            if (unit.can_harvest) {
+                                unit.assigned_resource_x = -1;
+                                unit.assigned_resource_y = -1;
+                            }
                         }
                     }
                 }

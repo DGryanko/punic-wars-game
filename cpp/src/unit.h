@@ -26,6 +26,10 @@ struct Unit {
     int carrying_food = 0;         // Скільки їжі несе
     int carrying_gold = 0;         // Скільки золота несе
     int max_carry_capacity = 20;   // Максимальна вантажопідйомність
+    int assigned_resource_x = -1;  // Призначена ресурсна точка X
+    int assigned_resource_y = -1;  // Призначена ресурсна точка Y
+    int dropoff_building_x = -1;   // Будівля для здачі X
+    int dropoff_building_y = -1;   // Будівля для здачі Y
     
     // Бойові параметри
     int attack_damage = 0;         // Урон атаки
@@ -164,6 +168,20 @@ struct Unit {
         target_y = newY;
         is_moving = true;
         is_harvesting = false; // Припинити збір при русі
+    }
+    
+    // Призначити ресурсну точку для збору
+    void assignResource(int resourceX, int resourceY, int buildingX, int buildingY) {
+        assigned_resource_x = resourceX;
+        assigned_resource_y = resourceY;
+        dropoff_building_x = buildingX;
+        dropoff_building_y = buildingY;
+        moveTo(resourceX, resourceY);
+    }
+    
+    // Перевірити, чи призначена ресурсна точка
+    bool hasAssignedResource() const {
+        return assigned_resource_x != -1 && assigned_resource_y != -1;
     }
     
     // Почати збір ресурсів
