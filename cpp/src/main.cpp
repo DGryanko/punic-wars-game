@@ -13,6 +13,17 @@ enum GameState {
     EXIT
 };
 
+// Музичні стани
+enum MusicState {
+    MUSIC_MENU,           // Головне меню
+    MUSIC_AMBIENT,        // Амбієнт карти (фон геймплею)
+    MUSIC_BATTLE_ROME,    // Бойова музика Риму
+    MUSIC_BATTLE_CARTHAGE,// Бойова музика Карфагену
+    MUSIC_SUSPENSE,       // Напруга (ворог атакує)
+    MUSIC_PEACEFUL,       // Мирна (будівництво)
+    MUSIC_DEFEAT          // Поразка
+};
+
 // Налаштування звуку
 struct AudioSettings {
     float musicVolume = 0.5f;      // Музика (0.0 - 1.0)
@@ -32,11 +43,23 @@ int carth_money = 200;
 
 // Музика та звуки
 Music menuMusic;
-Music battleMusicRome;
-Music battleMusicCarthage;
-Music currentBattleMusic;
+Music ambientMusic[2];          // 2 амбієнт треки
+Music battleMusicRome[2];       // 2 бойові треки Риму
+Music battleMusicCarthage[2];   // 2 бойові треки Карфагену
+Music suspenseMusic[2];         // 2 треки напруги
+Music peacefulMusic[2];         // 2 мирні треки
+Music defeatMusic[2];           // 2 треки поразки
+Music currentMusic;
+MusicState currentMusicState = MUSIC_MENU;
+MusicState previousMusicState = MUSIC_MENU;
 Texture2D menuBackground;
 bool audioInitialized = false;
+
+// Таймери для музичної логіки
+float combatTimer = 0.0f;           // Скільки часу йде бій
+float peacefulTimer = 0.0f;         // Скільки часу без бою
+const float COMBAT_MUSIC_DELAY = 3.0f;    // 3 секунди бою для бойової музики
+const float PEACEFUL_MUSIC_DELAY = 10.0f; // 10 секунд без бою для мирної музики
 
 // Списки об'єктів
 std::vector<Building> buildings;
@@ -63,6 +86,144 @@ enum CursorType {
 };
 
 CursorType currentCursor = CURSOR_DEFAULT;
+
+// Функція для перемикання музики
+void SwitchMusic(MusicState newState) {
+    if (currentMusicState == newState || !audioInitialized) return;
+    
+    // Зупиняємо поточну музику
+    StopMusicStream(currentMusic);
+    
+    // Вибираємо нову музику (випадковий трек з двох)
+    int randomTrack = rand() % 2; // 0 або 1
+    
+    switch (newState) {
+        case MUSIC_MENU:
+            currentMusic = menuMusic;
+            break;
+        case MUSIC_AMBIENT:
+            currentMusic = ambientMusic[randomTrack];
+            break;
+        case MUSIC_BATTLE_ROME:
+            currentMusic = battleMusicRome[randomTrack];
+            break;
+        case MUSIC_BATTLE_CARTHAGE:
+            currentMusic = battleMusicCarthage[randomTrack];
+            break;
+        case MUSIC_SUSPENSE:
+            currentMusic = suspenseMusic[randomTrack];
+            break;
+        case MUSIC_PEACEFUL:
+            currentMusic = peacefulMusic[randomTrack];
+            break;
+        case MUSIC_DEFEAT:
+            currentMusic = defeatMusic[randomTrack];
+            break;
+    }
+    
+    // Запускаємо нову музику
+    SetMusicVolume(currentMusic, audioSettings.musicVolume);
+    PlayMusicStream(currentMusic);
+    previousMusicState = currentMusicState;
+    currentMusicState = newState;
+}
+
+// Функція для оновлення музичного стану в грі
+void UpdateGameMusic() {
+    if (!audioInitialized) return;
+    
+    // Перевіряємо чи трек закінчився і запускаємо новий випадковий
+    if (!IsMusicStreamPlaying(currentMusic)) {
+        // Трек закінчився, запускаємо новий випадковий того ж типу
+        int randomTrack = rand() % 2;
+        
+        switch (currentMusicState) {
+            case MUSIC_AMBIENT:
+                currentMusic = ambientMusic[randomTrack];
+                break;
+            case MUSIC_BATTLE_ROME:
+                currentMusic = battleMusicRome[randomTrack];
+                break;
+            case MUSIC_BATTLE_CARTHAGE:
+                currentMusic = battleMusicCarthage[randomTrack];
+                break;
+            case MUSIC_SUSPENSE:
+                currentMusic = suspenseMusic[randomTrack];
+                break;
+            case MUSIC_PEACEFUL:
+                currentMusic = peacefulMusic[randomTrack];
+                break;
+            case MUSIC_DEFEAT:
+                currentMusic = defeatMusic[randomTrack];
+                break;
+            default:
+                break;
+        }
+        
+        SetMusicVolume(currentMusic, audioSettings.musicVolume);
+        PlayMusicStream(currentMusic);
+    }
+    
+    // Перевіряємо чи є бій
+    bool isInCombat = false;
+    bool enemyNearby = false;
+    
+    for (const auto& unit : units) {
+        if (unit.faction == playerFaction) {
+            // Перевіряємо чи атакує цей юніт
+            if (unit.is_attacking || unit.target_unit_id >= 0) {
+                isInCombat = true;
+                break;
+            }
+            
+            // Перевіряємо чи є вороги поблизу (в радіусі 200 пікселів)
+            for (const auto& enemy : units) {
+                if (enemy.faction != playerFaction) {
+                    float dist = sqrt(pow(unit.x - enemy.x, 2) + pow(unit.y - enemy.y, 2));
+                    if (dist < 200) {
+                        enemyNearby = true;
+                        break;
+                    }
+                }
+            }
+            if (enemyNearby) break;
+        }
+    }
+    
+    // Оновлюємо таймери
+    if (isInCombat) {
+        combatTimer += GetFrameTime();
+        peacefulTimer = 0.0f;
+    } else {
+        peacefulTimer += GetFrameTime();
+        combatTimer = 0.0f;
+    }
+    
+    // Логіка перемикання музики за пріоритетами
+    if (enemyNearby && !isInCombat && currentMusicState != MUSIC_SUSPENSE) {
+        // Пріоритет 5: Ворог поблизу але ще не б'ються
+        SwitchMusic(MUSIC_SUSPENSE);
+    }
+    else if (isInCombat && combatTimer > COMBAT_MUSIC_DELAY) {
+        // Пріоритет 3-4: Бойова музика (залежить від фракції)
+        MusicState battleState = (playerFaction == ROME) ? MUSIC_BATTLE_ROME : MUSIC_BATTLE_CARTHAGE;
+        if (currentMusicState != battleState) {
+            SwitchMusic(battleState);
+        }
+    }
+    else if (!isInCombat && !enemyNearby && peacefulTimer > PEACEFUL_MUSIC_DELAY) {
+        // Пріоритет 8: Мирна музика (будівництво)
+        if (currentMusicState != MUSIC_PEACEFUL) {
+            SwitchMusic(MUSIC_PEACEFUL);
+        }
+    }
+    else if (!isInCombat && !enemyNearby && peacefulTimer > 2.0f && peacefulTimer <= PEACEFUL_MUSIC_DELAY) {
+        // Пріоритет 2: Амбієнт (фон геймплею)
+        if (currentMusicState != MUSIC_AMBIENT && currentMusicState != MUSIC_PEACEFUL) {
+            SwitchMusic(MUSIC_AMBIENT);
+        }
+    }
+}
 
 // Функції для роботи з ресурсами
 struct UnitCost {
@@ -425,9 +586,7 @@ void DrawSettings() {
             if (audioSettings.musicVolume < 0) audioSettings.musicVolume = 0;
             if (audioSettings.musicVolume > 1) audioSettings.musicVolume = 1;
             if (audioInitialized) {
-                SetMusicVolume(menuMusic, audioSettings.musicVolume);
-                SetMusicVolume(battleMusicRome, audioSettings.musicVolume);
-                SetMusicVolume(battleMusicCarthage, audioSettings.musicVolume);
+                SetMusicVolume(currentMusic, audioSettings.musicVolume);
             }
         }
         if (CheckCollisionPointRec(mousePos, ambientSlider)) {
@@ -566,12 +725,9 @@ void DrawFactionSelect() {
             InitBuildings();
             InitResources();
             units.clear();
-            // Зупиняємо меню музику і запускаємо бойову для Риму
+            // Запускаємо амбієнт музику для геймплею
             if (audioInitialized) {
-                StopMusicStream(menuMusic);
-                currentBattleMusic = battleMusicRome;
-                PlayMusicStream(currentBattleMusic);
-                SetMusicVolume(currentBattleMusic, audioSettings.musicVolume);
+                SwitchMusic(MUSIC_AMBIENT);
             }
         }
         if (carthageHover) {
@@ -580,16 +736,17 @@ void DrawFactionSelect() {
             InitBuildings();
             InitResources();
             units.clear();
-            // Зупиняємо меню музику і запускаємо бойову для Карфагену
+            // Запускаємо амбієнт музику для геймплею
             if (audioInitialized) {
-                StopMusicStream(menuMusic);
-                currentBattleMusic = battleMusicCarthage;
-                PlayMusicStream(currentBattleMusic);
-                SetMusicVolume(currentBattleMusic, audioSettings.musicVolume);
+                SwitchMusic(MUSIC_AMBIENT);
             }
         }
         if (backHover) {
             currentState = MENU;
+            // Повертаємось до меню музики
+            if (audioInitialized) {
+                SwitchMusic(MUSIC_MENU);
+            }
         }
     }
     
@@ -940,11 +1097,9 @@ void DrawGame() {
     // Обробка ESC - повернення в меню
     if (IsKeyPressed(KEY_ESCAPE)) {
         currentState = MENU;
-        // Зупиняємо бойову музику і запускаємо меню музику
+        // Повертаємось до меню музики
         if (audioInitialized) {
-            StopMusicStream(currentBattleMusic);
-            PlayMusicStream(menuMusic);
-            SetMusicVolume(menuMusic, audioSettings.musicVolume);
+            SwitchMusic(MUSIC_MENU);
         }
         return;
     }
@@ -1188,29 +1343,41 @@ int main() {
     
     // Завантаження музики
     menuMusic = LoadMusicStream("assets/sounds/Punic wars_ Castra.mp3");
-    battleMusicRome = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Rome.mp3");
-    battleMusicCarthage = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Carthage.mp3");
+    ambientMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Ambient.mp3");
+    ambientMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Ambient 2.mp3");
+    battleMusicRome[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Rome.mp3");
+    battleMusicRome[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Rome 2.mp3");
+    battleMusicCarthage[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Carthage.mp3");
+    battleMusicCarthage[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Battlemusic Carthage 2.mp3");
+    suspenseMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Suspense.mp3");
+    suspenseMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Suspense 2.mp3");
+    peacefulMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Peaceful.mp3");
+    peacefulMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Peaceful 2.mp3");
+    defeatMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Defeat.mp3");
+    defeatMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Defeat 2.mp3");
     
     // Завантаження фону меню
     menuBackground = LoadTexture("assets/Background.png");
     
     // Перевірка завантаження
-    if (menuMusic.frameCount > 0 && battleMusicRome.frameCount > 0 && battleMusicCarthage.frameCount > 0) {
+    if (menuMusic.frameCount > 0 && ambientMusic[0].frameCount > 0 && 
+        battleMusicRome[0].frameCount > 0 && battleMusicCarthage[0].frameCount > 0) {
         audioInitialized = true;
-        SetMusicVolume(menuMusic, audioSettings.musicVolume);
-        SetMusicVolume(battleMusicRome, audioSettings.musicVolume);
-        SetMusicVolume(battleMusicCarthage, audioSettings.musicVolume);
-        PlayMusicStream(menuMusic); // Запускаємо меню музику
+        currentMusic = menuMusic;
+        currentMusicState = MUSIC_MENU;
+        SetMusicVolume(currentMusic, audioSettings.musicVolume);
+        PlayMusicStream(currentMusic); // Запускаємо меню музику
     }
     
     // Головний цикл гри
     while (!WindowShouldClose() && currentState != EXIT) {
         // Оновлюємо музику
         if (audioInitialized) {
-            if (currentState == MENU || currentState == SETTINGS || currentState == FACTION_SELECT) {
-                UpdateMusicStream(menuMusic);
-            } else if (currentState == PLAYING) {
-                UpdateMusicStream(currentBattleMusic);
+            UpdateMusicStream(currentMusic);
+            
+            // Оновлюємо музичний стан в грі
+            if (currentState == PLAYING) {
+                UpdateGameMusic();
             }
         }
         
@@ -1239,8 +1406,18 @@ int main() {
     // Вивантаження ресурсів
     if (audioInitialized) {
         UnloadMusicStream(menuMusic);
-        UnloadMusicStream(battleMusicRome);
-        UnloadMusicStream(battleMusicCarthage);
+        UnloadMusicStream(ambientMusic[0]);
+        UnloadMusicStream(ambientMusic[1]);
+        UnloadMusicStream(battleMusicRome[0]);
+        UnloadMusicStream(battleMusicRome[1]);
+        UnloadMusicStream(battleMusicCarthage[0]);
+        UnloadMusicStream(battleMusicCarthage[1]);
+        UnloadMusicStream(suspenseMusic[0]);
+        UnloadMusicStream(suspenseMusic[1]);
+        UnloadMusicStream(peacefulMusic[0]);
+        UnloadMusicStream(peacefulMusic[1]);
+        UnloadMusicStream(defeatMusic[0]);
+        UnloadMusicStream(defeatMusic[1]);
     }
     UnloadTexture(menuBackground);
     CloseAudioDevice();
