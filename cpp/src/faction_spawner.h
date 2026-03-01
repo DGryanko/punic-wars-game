@@ -124,14 +124,26 @@ private:
         int buildingIndex = buildings->size();
         if (placer->placeBuilding(hq, position.row, position.col, buildingIndex)) {
             buildings->push_back(hq);
-            printf("[FactionSpawner] %s HQ spawned at tile (%d, %d)\n", 
+            printf("[FactionSpawner] %s HQ spawned at tile (%d, %d) at world pos (%d, %d)\n", 
                    (faction == ROME) ? "Rome" : "Carthage", 
-                   position.row, position.col);
+                   position.row, position.col,
+                   (*buildings)[buildingIndex].x, (*buildings)[buildingIndex].y);
         } else {
             printf("[FactionSpawner] Error: Failed to place %s HQ at tile (%d, %d)\n", 
                    (faction == ROME) ? "Rome" : "Carthage", 
                    position.row, position.col);
         }
+    }
+    
+    // Отримати позицію останнього створеного HQ (для фокусування камери)
+    bool getLastHQPosition(int& worldX, int& worldY) const {
+        if (buildings && !buildings->empty()) {
+            const Building& lastBuilding = buildings->back();
+            worldX = lastBuilding.x;
+            worldY = lastBuilding.y;
+            return true;
+        }
+        return false;
     }
 };
 

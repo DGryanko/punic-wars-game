@@ -40,11 +40,11 @@ public:
             DrawTexture(resourcePanel, (int)panelX, 10, WHITE);
             
             // Малюємо значення ресурсів на панелі
-            // Ліва частина панелі - їжа (амфора) - приблизно на 1/4 ширини панелі
-            DrawText(TextFormat("%d", availableFood), (int)panelX + 250, 50, 24, {255, 255, 255, 255});
+            // Ліва частина панелі - їжа (амфора)
+            DrawText(TextFormat("%d", availableFood), (int)panelX + 280, 50, 28, {255, 255, 255, 255});
             
-            // Права частина панелі - гроші (монета) - приблизно на 3/4 ширини панелі
-            DrawText(TextFormat("%d", availableMoney), (int)panelX + 750, 50, 24, {255, 255, 255, 255});
+            // Права частина панелі - гроші (монета) - зміщено праворуч
+            DrawText(TextFormat("%d", availableMoney), (int)panelX + 680, 50, 28, {255, 255, 255, 255});
         } else {
             // Fallback якщо панель не завантажилась
             DrawRectangle(0, 0, 1434, 80, {0, 0, 0, 180});

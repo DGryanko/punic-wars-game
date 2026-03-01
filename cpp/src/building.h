@@ -107,8 +107,22 @@ struct Building {
         use_texture = true;
     }
     
-    // Отримати прямокутник для колізій
+    // Отримати прямокутник для колізій з іншими об'єктами (маленький)
+    Rectangle getCollisionRect() const {
+        return {(float)x, (float)y, 80, 60};
+    }
+    
+    // Отримати прямокутник для кліків (враховує текстуру)
     Rectangle getRect() const {
+        if (use_texture) {
+            // Використовуємо розмір текстури для кліків
+            return {
+                (float)x + texture_offset.x,
+                (float)y + texture_offset.y,
+                384 * texture_scale,  // Ширина текстури
+                224 * texture_scale   // Висота текстури
+            };
+        }
         return {(float)x, (float)y, 80, 60};
     }
     

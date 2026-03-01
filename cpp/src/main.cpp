@@ -706,6 +706,18 @@ void InitBuildings() {
     // Автоматичний спавн головних наметів фракцій
     factionSpawner->spawnFactionHQs();
     
+    // Фокусуємо камеру на HQ гравця з максимальним зумом
+    for (const auto& building : buildings) {
+        if (building.faction == playerFaction && 
+            (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
+            mapCamera.target = {(float)building.x, (float)building.y};
+            mapCamera.zoom = 1.5f;  // Максимальний зум на HQ
+            printf("[CAMERA] Focused on player HQ at (%d, %d) with zoom %.1f\n", 
+                   building.x, building.y, mapCamera.zoom);
+            break;
+        }
+    }
+    
     // Оновлюємо pathfinding grid з новими будівлями
     pathfindingManager.updateGrid(buildings);
     
@@ -1309,7 +1321,7 @@ void DrawGame() {
         bool hasCollision = false;
         
         for (const auto& building : buildings) {
-            if (CheckCollisionRecs(unitRect, building.getRect())) {
+            if (CheckCollisionRecs(unitRect, building.getCollisionRect())) {
                 hasCollision = true;
                 break;
             }
@@ -1534,9 +1546,6 @@ void DrawGame() {
         DrawText(info.c_str(), 10, 50, 14, YELLOW);
     }
     
-    // Статистика
-    DrawText(TextFormat("Units: %d", (int)units.size()), 800, 50, 14, LIGHTGRAY);
-    
     // Малювання області виділення
     if (isDragging) {
         Rectangle selectionRect = {
@@ -1646,9 +1655,9 @@ int main() {
     // Приховуємо системний курсор
     HideCursor();
     
-    // Ініціалізація генератора карти
+    // Ініціалізація генератора карти (збільшено розмір до 80x80)
     mapGenerator = new MapGenerator(time(nullptr));
-    gameMap = new TileMap(mapGenerator->generate(50, 50));
+    gameMap = new TileMap(mapGenerator->generate(80, 80));
     mapRenderer = new IsometricRenderer();
     
     // Завантаження тайлсету
@@ -1659,11 +1668,11 @@ int main() {
         printf("[TILEMAP] Warning: Tileset not found, using debug rendering\n");
     }
     
-    // Налаштування камери для карти
-    mapCamera.target = {0, 800};  // Центр карти 50x50
+    // Налаштування камери для карти (початкова позиція - центр карти)
+    mapCamera.target = {1280, 1280};  // Центр карти 80x80
     mapCamera.offset = {screenWidth / 2.0f, screenHeight / 2.0f};
     mapCamera.rotation = 0.0f;
-    mapCamera.zoom = 0.5f;
+    mapCamera.zoom = 0.4f;  // Зменшено зум щоб бачити більше карти
     mapRenderer->setCamera(mapCamera);
     
     printf("[TILEMAP] Map generated: %dx%d, %.1f%% passable\n", 
