@@ -11,16 +11,21 @@ enum Faction {
 
 // Типи будівель (мінімальний набір для MVP)
 enum BuildingType {
-    HQ_ROME,        // Преторій
-    HQ_CARTHAGE,    // Головне шатро
-    BARRACKS_ROME,  // Контуберній (казарма)
+    HQ_ROME,           // Преторій
+    HQ_CARTHAGE,       // Головне шатро
+    BARRACKS_ROME,     // Контуберній (казарма)
     BARRACKS_CARTHAGE, // Карфагенська казарма
-    QUESTORIUM_ROME    // Квесторій (склад ресурсів)
+    QUESTORIUM_ROME,   // Квесторій (склад ресурсів)
+    LIBTENT_1,         // Палатка лівійців рівень 1
+    LIBTENT_2,         // Палатка лівійців рівень 2
+    LIBTENT_3,         // Палатка лівійців рівень 3
+    TENTORIUM          // Тенторіум торговця
 };
 
 // Структура будівлі
 struct Building {
     int x, y;                    // Координати
+    int tile_row, tile_col;      // Тайлові координати
     BuildingType type;           // Тип будівлі
     Faction faction;             // Фракція
     bool selected = false;       // Чи вибрана будівля
@@ -36,36 +41,85 @@ struct Building {
     // Черга виробництва
     std::vector<std::string> production_queue; // Черга юнітів для виробництва
     
+    // Текстури
+    bool use_texture = true;        // Чи використовувати текстуру
+    Vector2 texture_offset = {0, 0}; // Зміщення текстури відносно позиції
+    float texture_scale = 1.0f;     // Масштаб текстури
+    
     // Ініціалізація будівлі
     void init(BuildingType buildingType, Faction buildingFaction, int posX, int posY) {
         type = buildingType;
         faction = buildingFaction;
         x = posX;
         y = posY;
+        tile_row = 0;
+        tile_col = 0;
         
         // Встановлення назви залежно від типу
         switch (type) {
             case HQ_ROME:
                 name = "Praetorium";
+                texture_offset = {-192, -112};  // Центруємо більшу текстуру
+                texture_scale = 1.0f;           // Повний розмір (384x224)
                 break;
             case HQ_CARTHAGE:
                 name = "Main Tent";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
                 break;
             case BARRACKS_ROME:
                 name = "Contubernium";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
                 break;
             case BARRACKS_CARTHAGE:
                 name = "Mercenary Camp";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
                 break;
             case QUESTORIUM_ROME:
                 name = "Questorium";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
+                break;
+            case LIBTENT_1:
+                name = "Libyan Tent I";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
+                break;
+            case LIBTENT_2:
+                name = "Libyan Tent II";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
+                break;
+            case LIBTENT_3:
+                name = "Libyan Tent III";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
+                break;
+            case TENTORIUM:
+                name = "Tentorium";
+                texture_offset = {-192, -112};
+                texture_scale = 1.0f;
                 break;
         }
+        
+        use_texture = true;
     }
     
     // Отримати прямокутник для колізій
     Rectangle getRect() const {
         return {(float)x, (float)y, 80, 60};
+    }
+    
+    // Отримати прямокутник для текстури
+    Rectangle getTextureRect() const {
+        return {
+            (float)x + texture_offset.x,
+            (float)y + texture_offset.y,
+            80 * texture_scale,
+            60 * texture_scale
+        };
     }
     
     // Отримати колір залежно від фракції
