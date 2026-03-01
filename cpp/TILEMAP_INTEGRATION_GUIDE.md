@@ -261,7 +261,7 @@ if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
 
 ```cpp
 GenerationParams params;
-params.water_level = 0.3f;    // 0-30% = вода
+params.water_level = 0.4f;    // 0-40% = вода
 params.sand_level = 0.5f;     // 30-50% = пісок
 params.grass_level = 0.9f;    // 50-90% = трава
 params.noise_scale = 0.1f;    // Масштаб деталей

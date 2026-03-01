@@ -4,8 +4,10 @@
 #include "resource.h"
 #include "pathfinding.h"
 #include "ui_button.h"
+#include "tilemap/tilemap_generator.h"
 #include <vector>
 #include <cmath>
+#include <ctime>
 
 // Стани гри
 enum GameState {
@@ -98,6 +100,12 @@ int selectedUnitIndex = -1;
 
 // Pathfinding система
 PathfindingManager pathfindingManager;
+
+// Генератор ізометричної карти
+MapGenerator* mapGenerator = nullptr;
+TileMap* gameMap = nullptr;
+IsometricRenderer* mapRenderer = nullptr;
+Camera2D mapCamera = {0};
 
 // Система виділення областю
 bool isDragging = false;
@@ -1664,6 +1672,16 @@ void DrawGame() {
         }
     }
     
+    // Малювання ізометричної карти (фон)
+    if (mapRenderer && gameMap) {
+        mapRenderer->setCamera(mapCamera);
+        if (mapRenderer->isTilesetLoaded()) {
+            mapRenderer->render(*gameMap);
+        } else {
+            mapRenderer->renderDebug(*gameMap);
+        }
+    }
+    
     // Малювання всіх будівель
     for (const auto& building : buildings) {
         building.draw();
@@ -1828,6 +1846,30 @@ int main() {
     // Приховуємо системний курсор
     HideCursor();
     
+    // Ініціалізація генератора карти
+    mapGenerator = new MapGenerator(time(nullptr));
+    gameMap = new TileMap(mapGenerator->generate(50, 50));
+    mapRenderer = new IsometricRenderer();
+    
+    // Завантаження тайлсету
+    if (FileExists("assets/isometric_tileset.png")) {
+        mapRenderer->loadTileset("assets/isometric_tileset.png");
+        printf("[TILEMAP] Tileset loaded successfully\n");
+    } else {
+        printf("[TILEMAP] Warning: Tileset not found, using debug rendering\n");
+    }
+    
+    // Налаштування камери для карти
+    mapCamera.target = {0, 800};  // Центр карти 50x50
+    mapCamera.offset = {screenWidth / 2.0f, screenHeight / 2.0f};
+    mapCamera.rotation = 0.0f;
+    mapCamera.zoom = 0.5f;
+    mapRenderer->setCamera(mapCamera);
+    
+    printf("[TILEMAP] Map generated: %dx%d, %.1f%% passable\n", 
+           gameMap->getWidth(), gameMap->getHeight(), 
+           gameMap->getPassablePercentage() * 100.0f);
+    
     // Перевірка завантаження
     if (menuMusic.frameCount > 0 && ambientMusic[0].frameCount > 0 && 
         battleMusicRome[0].frameCount > 0 && battleMusicCarthage[0].frameCount > 0) {
@@ -1901,6 +1943,14 @@ int main() {
     
     // Вивантаження текстур динамічних кнопок
     DynamicButton::UnloadTextures();
+    
+    // Очищення генератора карти
+    if (mapRenderer) {
+        mapRenderer->unloadTileset();
+        delete mapRenderer;
+    }
+    if (gameMap) delete gameMap;
+    if (mapGenerator) delete mapGenerator;
     
     CloseAudioDevice();
     

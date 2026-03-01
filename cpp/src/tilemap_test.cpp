@@ -39,10 +39,14 @@ int main() {
     }
     
     // Налаштування камери
+    // Для карти 50x50, центр знаходиться приблизно на (25, 25) в grid координатах
+    // Конвертуємо в screen координати: screenX = (col - row) * 64, screenY = (col + row) * 32
+    // Для (25, 25): screenX = 0, screenY = 1600
     Camera2D camera = {0};
-    camera.target = {0, 0};
+    camera.target = {0, 800};  // Центр карти 50x50
     camera.offset = {screenWidth / 2.0f, screenHeight / 2.0f};
     camera.rotation = 0.0f;
+    camera.zoom = 0.5f;  // Початковий зум - вся карта видна
     camera.zoom = 1.0f;
     renderer.setCamera(camera);
     
@@ -62,9 +66,9 @@ int main() {
         // Зум колесом миші
         float wheel = GetMouseWheelMove();
         if (wheel != 0) {
-            camera.zoom += wheel * 0.1f;
-            if (camera.zoom < 0.5f) camera.zoom = 0.5f;
-            if (camera.zoom > 2.0f) camera.zoom = 2.0f;
+            camera.zoom += wheel * 0.05f;
+            if (camera.zoom < 0.2f) camera.zoom = 0.2f;  // Мінімум - вся карта
+            if (camera.zoom > 2.0f) camera.zoom = 2.0f;  // Максимум - деталі
         }
         
         renderer.setCamera(camera);
