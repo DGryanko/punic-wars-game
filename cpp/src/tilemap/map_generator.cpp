@@ -45,7 +45,7 @@ TileMap MapGenerator::generate(int width, int height, const GenerationParams& p)
     noise_gen.setOctaves(params.octaves);
     
     // Створюємо карту
-    TileMap map(width, height, noise_gen.getScale());
+    TileMap map(width, height, noise_gen.getSeed());
     
     // Генеруємо місцевість за допомогою шуму
     for (int row = 0; row < height; row++) {

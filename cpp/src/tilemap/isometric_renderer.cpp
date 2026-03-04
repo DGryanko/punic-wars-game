@@ -59,11 +59,13 @@ void IsometricRenderer::calculateVisibleTiles(const TileMap& map) {
     GridCoords tl = CoordinateConverter::screenToGrid({top_left.x, top_left.y});
     GridCoords br = CoordinateConverter::screenToGrid({bottom_right.x, bottom_right.y});
     
-    // Додаємо запас для перекриття тайлів
-    visible_start.row = std::max(0, std::min(tl.row, br.row) - 2);
-    visible_start.col = std::max(0, std::min(tl.col, br.col) - 2);
-    visible_end.row = std::min(map.getHeight() - 1, std::max(tl.row, br.row) + 2);
-    visible_end.col = std::min(map.getWidth() - 1, std::max(tl.col, br.col) + 2);
+    // Додаємо ВЕЛИКИЙ запас для перекриття тайлів та для ізометричної проекції
+    // В ізометричній проекції видима область набагато більша ніж здається
+    int padding = 20;  // Збільшено з 2 до 20
+    visible_start.row = std::max(0, std::min(tl.row, br.row) - padding);
+    visible_start.col = std::max(0, std::min(tl.col, br.col) - padding);
+    visible_end.row = std::min(map.getHeight() - 1, std::max(tl.row, br.row) + padding);
+    visible_end.col = std::min(map.getWidth() - 1, std::max(tl.col, br.col) + padding);
 }
 
 bool IsometricRenderer::isTileVisible(int row, int col) const {
@@ -109,49 +111,44 @@ void IsometricRenderer::render(const TileMap& map) {
     }
     
     current_map = &map;
-    calculateVisibleTiles(map);
     
+    // Рендеримо всю карту без culling (80x80 не така велика)
     // Painter's algorithm: малюємо від заду до переду
     // Порядок: верхні ряди → нижні ряди, зліва направо
-    for (int row = visible_start.row; row <= visible_end.row; row++) {
-        for (int col = visible_start.col; col <= visible_end.col; col++) {
-            if (map.isValidCoord(row, col)) {
-                TerrainType type = map.getTile(row, col);
-                renderTile(row, col, type);
-            }
+    for (int row = 0; row < map.getHeight(); row++) {
+        for (int col = 0; col < map.getWidth(); col++) {
+            TerrainType type = map.getTile(row, col);
+            renderTile(row, col, type);
         }
     }
 }
 
 void IsometricRenderer::renderDebug(const TileMap& map) {
     current_map = &map;
-    calculateVisibleTiles(map);
     
-    // Малюємо кольорові ромби для debug
-    for (int row = visible_start.row; row <= visible_end.row; row++) {
-        for (int col = visible_start.col; col <= visible_end.col; col++) {
-            if (map.isValidCoord(row, col)) {
-                TerrainType type = map.getTile(row, col);
-                Color color = getDebugColor(type);
-                
-                ScreenCoords screen = CoordinateConverter::gridToScreenWithOffset({row, col});
-                
-                // Координати ромба (4 точки)
-                Vector2 top = {screen.x + CoordinateConverter::TILE_WIDTH_HALF, screen.y};
-                Vector2 right = {screen.x + CoordinateConverter::TILE_WIDTH, screen.y + CoordinateConverter::TILE_HEIGHT_HALF};
-                Vector2 bottom = {screen.x + CoordinateConverter::TILE_WIDTH_HALF, screen.y + CoordinateConverter::TILE_HEIGHT};
-                Vector2 left = {screen.x, screen.y + CoordinateConverter::TILE_HEIGHT_HALF};
-                
-                // Малюємо заповнений ромб
-                DrawTriangle(top, right, bottom, color);
-                DrawTriangle(top, bottom, left, color);
-                
-                // Малюємо контур
-                DrawLineEx(top, right, 1.0f, BLACK);
-                DrawLineEx(right, bottom, 1.0f, BLACK);
-                DrawLineEx(bottom, left, 1.0f, BLACK);
-                DrawLineEx(left, top, 1.0f, BLACK);
-            }
+    // Малюємо кольорові ромби для debug - всю карту
+    for (int row = 0; row < map.getHeight(); row++) {
+        for (int col = 0; col < map.getWidth(); col++) {
+            TerrainType type = map.getTile(row, col);
+            Color color = getDebugColor(type);
+            
+            ScreenCoords screen = CoordinateConverter::gridToScreenWithOffset({row, col});
+            
+            // Координати ромба (4 точки)
+            Vector2 top = {screen.x + CoordinateConverter::TILE_WIDTH_HALF, screen.y};
+            Vector2 right = {screen.x + CoordinateConverter::TILE_WIDTH, screen.y + CoordinateConverter::TILE_HEIGHT_HALF};
+            Vector2 bottom = {screen.x + CoordinateConverter::TILE_WIDTH_HALF, screen.y + CoordinateConverter::TILE_HEIGHT};
+            Vector2 left = {screen.x, screen.y + CoordinateConverter::TILE_HEIGHT_HALF};
+            
+            // Малюємо заповнений ромб
+            DrawTriangle(top, right, bottom, color);
+            DrawTriangle(top, bottom, left, color);
+            
+            // Малюємо контур
+            DrawLineEx(top, right, 1.0f, BLACK);
+            DrawLineEx(right, bottom, 1.0f, BLACK);
+            DrawLineEx(bottom, left, 1.0f, BLACK);
+            DrawLineEx(left, top, 1.0f, BLACK);
         }
     }
 }

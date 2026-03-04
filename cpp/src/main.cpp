@@ -43,7 +43,17 @@ struct AudioSettings {
     float effectsVolume = 0.5f;    // Ефекти (0.0 - 1.0)
 };
 
+// Налаштування відображення
+struct DisplaySettings {
+    bool isWindowedFullscreen = false;
+    int windowWidth = 1434;
+    int windowHeight = 1075;
+    int savedX = 0;
+    int savedY = 0;
+};
+
 AudioSettings audioSettings;
+DisplaySettings displaySettings;
 
 // Глобальні змінні
 GameState currentState = MENU;
@@ -308,6 +318,33 @@ void UpdateGameMusic() {
         if (currentMusicState != MUSIC_AMBIENT && currentMusicState != MUSIC_PEACEFUL) {
             SwitchMusic(MUSIC_AMBIENT);
         }
+    }
+}
+
+// Функція для перемикання псевдоповноекранного режиму
+void ToggleWindowedFullscreen() {
+    if (!displaySettings.isWindowedFullscreen) {
+        // Переходимо в псевдоповноекранний режим
+        displaySettings.savedX = GetWindowPosition().x;
+        displaySettings.savedY = GetWindowPosition().y;
+        
+        int monitorWidth = GetMonitorWidth(GetCurrentMonitor());
+        int monitorHeight = GetMonitorHeight(GetCurrentMonitor());
+        
+        SetWindowState(FLAG_WINDOW_UNDECORATED);
+        SetWindowPosition(0, 0);
+        SetWindowSize(monitorWidth, monitorHeight);
+        
+        displaySettings.isWindowedFullscreen = true;
+        printf("[DISPLAY] Switched to windowed fullscreen: %dx%d\n", monitorWidth, monitorHeight);
+    } else {
+        // Повертаємось у віконний режим
+        ClearWindowState(FLAG_WINDOW_UNDECORATED);
+        SetWindowSize(displaySettings.windowWidth, displaySettings.windowHeight);
+        SetWindowPosition(displaySettings.savedX, displaySettings.savedY);
+        
+        displaySettings.isWindowedFullscreen = false;
+        printf("[DISPLAY] Switched to windowed mode: %dx%d\n", displaySettings.windowWidth, displaySettings.windowHeight);
     }
 }
 
@@ -804,8 +841,16 @@ void DrawSettings() {
     DrawRectangle(sliderX, 380, (int)(sliderWidth * audioSettings.effectsVolume), sliderHeight, RED);
     DrawText(TextFormat("%.0f%%", audioSettings.effectsVolume * 100), 820, 380, 20, WHITE);
     
+    // Чекбокс повноекранного режиму
+    DrawText("Fullscreen:", 200, 460, 20, WHITE);
+    Rectangle checkboxRect = {(float)sliderX, 460, 30, 30};
+    DrawRectangleRec(checkboxRect, DARKGRAY);
+    if (displaySettings.isWindowedFullscreen) {
+        DrawRectangle(sliderX + 5, 465, 20, 20, GREEN);
+    }
+    
     // Кнопка назад (без static)
-    DynamicButton backButton(450, 500, "BACK", 20);
+    DynamicButton backButton(450, 550, "BACK", 20);
     Vector2 mousePos = GetMousePosition();
     backButton.Update(mousePos);
     backButton.Draw();
@@ -832,13 +877,18 @@ void DrawSettings() {
         }
     }
     
+    // Обробка чекбоксу повноекранного режиму
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, checkboxRect)) {
+        ToggleWindowedFullscreen();
+    }
+    
     // Обробка кнопки назад
     if (backButton.IsClicked()) {
         currentState = MENU;
     }
     
     // Інструкції
-    DrawText("Adjust audio settings", 430, 450, 16, GRAY);
+    DrawText("Adjust game settings", 430, 510, 16, GRAY);
     
     // Малювання курсора
     DrawCustomCursor();
@@ -1669,10 +1719,15 @@ int main() {
     }
     
     // Налаштування камери для карти (початкова позиція - центр карти)
-    mapCamera.target = {1280, 1280};  // Центр карти 80x80
+    // Для ізометричної проекції карти 80x80:
+    // Центр знаходиться в точці (row=40, col=40)
+    // screenX = (40 - 40) * 64 = 0
+    // screenY = (40 + 40) * 32 = 2560
+    // Але щоб бачити всю карту, потрібно відступити вгору
+    mapCamera.target = {0, 1280};  // Зміщуємо камеру вище для кращого огляду
     mapCamera.offset = {screenWidth / 2.0f, screenHeight / 2.0f};
     mapCamera.rotation = 0.0f;
-    mapCamera.zoom = 0.4f;  // Зменшено зум щоб бачити більше карти
+    mapCamera.zoom = 0.5f;  // Зменшуємо зум щоб бачити більше карти
     mapRenderer->setCamera(mapCamera);
     
     printf("[TILEMAP] Map generated: %dx%d, %.1f%% passable\n", 

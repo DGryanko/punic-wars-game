@@ -45,6 +45,7 @@ public:
     
     float getScale() const { return scale; }
     int getOctaves() const { return octaves; }
+    unsigned int getSeed() const { return seed; }
 };
 
 #endif // NOISE_H

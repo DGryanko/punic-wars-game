@@ -8,11 +8,11 @@
 
 // Параметри генерації карти
 struct GenerationParams {
-    float water_level = 0.3f;      // Поріг для води (0.0 - 0.3)
-    float sand_level = 0.5f;       // Поріг для піску (0.3 - 0.5)
-    float grass_level = 0.9f;      // Поріг для трави (0.5 - 0.9)
-    float noise_scale = 0.1f;      // Масштаб шуму
-    int octaves = 4;               // Кількість октав для fractal noise
+    float water_level = 0.2f;      // Поріг для води (менше води)
+    float sand_level = 0.35f;      // Поріг для піску
+    float grass_level = 0.95f;     // Поріг для трави (більше трави)
+    float noise_scale = 0.05f;     // Менший масштаб = більші області
+    int octaves = 3;               // Менше октав = більш гладкі переходи
     
     GenerationParams() = default;
 };
