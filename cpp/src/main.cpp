@@ -81,6 +81,8 @@ MusicState currentMusicState = MUSIC_MENU;
 MusicState previousMusicState = MUSIC_MENU;
 Texture2D menuBackground;
 Texture2D factionBackground;
+Texture2D settingsBackground;
+Texture2D backgroundTexture;  // Загальна текстура для фону
 bool audioInitialized = false;
 
 // Текстури UI
@@ -810,47 +812,87 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
 
 // Функція для малювання меню налаштувань
 void DrawSettings() {
-    ClearBackground(BLACK);
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
     
-    // Заголовок
-    DrawText("SETTINGS", 450, 100, 40, GOLD);
-    
-    // Позиції повзунків
-    int sliderX = 400;
-    int sliderWidth = 400;
-    int sliderHeight = 20;
-    
-    // Повзунок музики
-    DrawText("Music Volume:", 200, 220, 20, WHITE);
-    Rectangle musicSlider = {(float)sliderX, 220, (float)sliderWidth, (float)sliderHeight};
-    DrawRectangleRec(musicSlider, DARKGRAY);
-    DrawRectangle(sliderX, 220, (int)(sliderWidth * audioSettings.musicVolume), sliderHeight, GREEN);
-    DrawText(TextFormat("%.0f%%", audioSettings.musicVolume * 100), 820, 220, 20, WHITE);
-    
-    // Повзунок середовища
-    DrawText("Ambient Volume:", 200, 300, 20, WHITE);
-    Rectangle ambientSlider = {(float)sliderX, 300, (float)sliderWidth, (float)sliderHeight};
-    DrawRectangleRec(ambientSlider, DARKGRAY);
-    DrawRectangle(sliderX, 300, (int)(sliderWidth * audioSettings.ambientVolume), sliderHeight, BLUE);
-    DrawText(TextFormat("%.0f%%", audioSettings.ambientVolume * 100), 820, 300, 20, WHITE);
-    
-    // Повзунок ефектів
-    DrawText("Effects Volume:", 200, 380, 20, WHITE);
-    Rectangle effectsSlider = {(float)sliderX, 380, (float)sliderWidth, (float)sliderHeight};
-    DrawRectangleRec(effectsSlider, DARKGRAY);
-    DrawRectangle(sliderX, 380, (int)(sliderWidth * audioSettings.effectsVolume), sliderHeight, RED);
-    DrawText(TextFormat("%.0f%%", audioSettings.effectsVolume * 100), 820, 380, 20, WHITE);
-    
-    // Чекбокс повноекранного режиму
-    DrawText("Fullscreen:", 200, 460, 20, WHITE);
-    Rectangle checkboxRect = {(float)sliderX, 460, 30, 30};
-    DrawRectangleRec(checkboxRect, DARKGRAY);
-    if (displaySettings.isWindowedFullscreen) {
-        DrawRectangle(sliderX + 5, 465, 20, 20, GREEN);
+    // Спочатку малюємо замощену текстуру фону (по висоті)
+    if (backgroundTexture.id > 0) {
+        float scale = (float)screenH / backgroundTexture.height;
+        int scaledWidth = backgroundTexture.width * scale;
+        
+        for (int x = 0; x < screenW; x += scaledWidth) {
+            DrawTexturePro(
+                backgroundTexture,
+                {0, 0, (float)backgroundTexture.width, (float)backgroundTexture.height},
+                {(float)x, 0, (float)scaledWidth, (float)screenH},
+                {0, 0}, 0.0f, WHITE
+            );
+        }
+    } else {
+        ClearBackground({40, 35, 30, 255});
     }
     
-    // Кнопка назад (без static)
-    DynamicButton backButton(450, 550, "BACK", 20);
+    // Поверх малюємо фон налаштувань зі збереженням пропорцій (по висоті)
+    if (settingsBackground.id > 0) {
+        float scale = (float)screenH / settingsBackground.height;
+        float drawWidth = settingsBackground.width * scale;
+        float drawHeight = screenH;
+        float offsetX = (screenW - drawWidth) / 2;
+        
+        DrawTexturePro(
+            settingsBackground,
+            {0, 0, (float)settingsBackground.width, (float)settingsBackground.height},
+            {offsetX, 0, drawWidth, drawHeight},
+            {0, 0}, 0.0f, WHITE
+        );
+    }
+    
+    // Заголовок відцентрований
+    const char* title = "SETTINGS";
+    int titleWidth = MeasureText(title, 40);
+    DrawText(title, (screenW - titleWidth) / 2, screenH * 0.1f, 40, GOLD);
+    
+    // Позиції повзунків відцентровані
+    int sliderWidth = 400;
+    int sliderHeight = 20;
+    int sliderX = (screenW - sliderWidth) / 2;
+    int labelX = sliderX - 200;
+    
+    float startY = screenH * 0.25f;
+    float spacing = 80;
+    
+    // Повзунок музики
+    DrawText("Music Volume:", labelX, startY, 20, WHITE);
+    Rectangle musicSlider = {(float)sliderX, startY, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(musicSlider, DARKGRAY);
+    DrawRectangle(sliderX, startY, (int)(sliderWidth * audioSettings.musicVolume), sliderHeight, GREEN);
+    DrawText(TextFormat("%.0f%%", audioSettings.musicVolume * 100), sliderX + sliderWidth + 20, startY, 20, WHITE);
+    
+    // Повзунок середовища
+    DrawText("Ambient Volume:", labelX, startY + spacing, 20, WHITE);
+    Rectangle ambientSlider = {(float)sliderX, startY + spacing, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(ambientSlider, DARKGRAY);
+    DrawRectangle(sliderX, startY + spacing, (int)(sliderWidth * audioSettings.ambientVolume), sliderHeight, BLUE);
+    DrawText(TextFormat("%.0f%%", audioSettings.ambientVolume * 100), sliderX + sliderWidth + 20, startY + spacing, 20, WHITE);
+    
+    // Повзунок ефектів
+    DrawText("Effects Volume:", labelX, startY + spacing * 2, 20, WHITE);
+    Rectangle effectsSlider = {(float)sliderX, startY + spacing * 2, (float)sliderWidth, (float)sliderHeight};
+    DrawRectangleRec(effectsSlider, DARKGRAY);
+    DrawRectangle(sliderX, startY + spacing * 2, (int)(sliderWidth * audioSettings.effectsVolume), sliderHeight, RED);
+    DrawText(TextFormat("%.0f%%", audioSettings.effectsVolume * 100), sliderX + sliderWidth + 20, startY + spacing * 2, 20, WHITE);
+    
+    // Чекбокс повноекранного режиму
+    DrawText("Fullscreen:", labelX, startY + spacing * 3, 20, WHITE);
+    Rectangle checkboxRect = {(float)sliderX, startY + spacing * 3, 30, 30};
+    DrawRectangleRec(checkboxRect, DARKGRAY);
+    if (displaySettings.isWindowedFullscreen) {
+        DrawRectangle(sliderX + 5, startY + spacing * 3 + 5, 20, 20, GREEN);
+    }
+    
+    // Кнопка назад відцентрована
+    DynamicButton backButton(0, startY + spacing * 4.5f, "BACK", 20);
+    backButton.bounds.x = (screenW - backButton.bounds.width) / 2.0f;
     Vector2 mousePos = GetMousePosition();
     backButton.Update(mousePos);
     backButton.Draw();
@@ -896,44 +938,49 @@ void DrawSettings() {
 
 // Функція для малювання меню
 void DrawMenu() {
-    ClearBackground(BLACK);
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
     
-    // Малюємо фон якщо завантажений (масштабуємо до розміру вікна)
-    if (menuBackground.id > 0) {
-        // Розраховуємо масштаб для заповнення екрану
-        float scaleX = 1434.0f / menuBackground.width;
-        float scaleY = 1075.0f / menuBackground.height;
-        float scale = (scaleX > scaleY) ? scaleX : scaleY; // Беремо більший масштаб
+    // Спочатку малюємо замощену текстуру фону (по висоті)
+    if (backgroundTexture.id > 0) {
+        float scale = (float)screenH / backgroundTexture.height;
+        int scaledWidth = backgroundTexture.width * scale;
         
-        // Центруємо фон
+        for (int x = 0; x < screenW; x += scaledWidth) {
+            DrawTexturePro(
+                backgroundTexture,
+                {0, 0, (float)backgroundTexture.width, (float)backgroundTexture.height},
+                {(float)x, 0, (float)scaledWidth, (float)screenH},
+                {0, 0}, 0.0f, WHITE
+            );
+        }
+    } else {
+        ClearBackground({40, 35, 30, 255});
+    }
+    
+    // Поверх малюємо основне зображення зі збереженням пропорцій (по висоті)
+    if (menuBackground.id > 0) {
+        float scale = (float)screenH / menuBackground.height;
         float drawWidth = menuBackground.width * scale;
-        float drawHeight = menuBackground.height * scale;
-        float offsetX = (1434 - drawWidth) / 2;
-        float offsetY = (1075 - drawHeight) / 2;
+        float drawHeight = screenH;
+        float offsetX = (screenW - drawWidth) / 2;
         
         DrawTexturePro(
             menuBackground,
             {0, 0, (float)menuBackground.width, (float)menuBackground.height},
-            {offsetX, offsetY, drawWidth, drawHeight},
-            {0, 0},
-            0.0f,
-            WHITE
+            {offsetX, 0, drawWidth, drawHeight},
+            {0, 0}, 0.0f, WHITE
         );
     }
     
-    // Напівпрозорий оверлей для кращої читабельності - ПРИБРАНО
-    // DrawRectangle(0, 0, 1434, 1075, {0, 0, 0, 150});
-    
     // Малюємо логотип якщо завантажений
     if (logoLoaded && gameLogo.id > 0) {
-        // Розраховуємо розмір логотипу (зменшуємо до 15% від оригінального розміру)
         float logoScale = 0.15f;
         float logoWidth = gameLogo.width * logoScale;
         float logoHeight = gameLogo.height * logoScale;
         
-        // Центруємо логотип вгорі
-        float logoX = (1434 - logoWidth) / 2;
-        float logoY = 80;
+        float logoX = (screenW - logoWidth) / 2;
+        float logoY = screenH * 0.1f;
         
         DrawTexturePro(
             gameLogo,
@@ -945,18 +992,15 @@ void DrawMenu() {
         );
     }
     
-    // Підзаголовок прибрано - не потрібен
+    // Створюємо динамічні кнопки відцентровані
+    float centerX = screenW / 2.0f;
+    float startY = screenH * 0.45f;
+    float buttonSpacing = 110;
     
-    // Створюємо динамічні кнопки з нормальним шрифтом (без static, щоб позиції оновлювалися)
-    // Відцентровуємо кнопки по горизонталі (ширина екрану 1434)
-    // Кнопки мають бути симетричні відносно центру
-    // Опускаємо кнопки нижче (додаємо висоту однієї кнопки ~92px)
-    DynamicButton startButton(400, 440, "START GAME", 24);
-    DynamicButton settingsButton(400, 550, "SETTINGS", 24);
-    DynamicButton exitButton(400, 660, "EXIT", 24);
+    DynamicButton startButton(0, startY, "START GAME", 24);
+    DynamicButton settingsButton(0, startY + buttonSpacing, "SETTINGS", 24);
+    DynamicButton exitButton(0, startY + buttonSpacing * 2, "EXIT", 24);
     
-    // Розраховуємо центр для кожної кнопки
-    float centerX = 1434.0f / 2.0f;
     startButton.bounds.x = centerX - startButton.bounds.width / 2.0f;
     settingsButton.bounds.x = centerX - settingsButton.bounds.width / 2.0f;
     exitButton.bounds.x = centerX - exitButton.bounds.width / 2.0f;
@@ -989,39 +1033,55 @@ void DrawMenu() {
 
 // Функція для екрану вибору фракції
 void DrawFactionSelect() {
-    ClearBackground(BLACK);
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
     
-    // Малюємо фон якщо завантажений (масштабуємо до розміру вікна)
-    if (factionBackground.id > 0) {
-        float scaleX = 1434.0f / factionBackground.width;
-        float scaleY = 1075.0f / factionBackground.height;
-        float scale = (scaleX > scaleY) ? scaleX : scaleY;
+    // Спочатку малюємо замощену текстуру фону (по висоті)
+    if (backgroundTexture.id > 0) {
+        float scale = (float)screenH / backgroundTexture.height;
+        int scaledWidth = backgroundTexture.width * scale;
         
+        for (int x = 0; x < screenW; x += scaledWidth) {
+            DrawTexturePro(
+                backgroundTexture,
+                {0, 0, (float)backgroundTexture.width, (float)backgroundTexture.height},
+                {(float)x, 0, (float)scaledWidth, (float)screenH},
+                {0, 0}, 0.0f, WHITE
+            );
+        }
+    } else {
+        ClearBackground({40, 35, 30, 255});
+    }
+    
+    // Поверх малюємо основне зображення зі збереженням пропорцій (по висоті)
+    if (factionBackground.id > 0) {
+        float scale = (float)screenH / factionBackground.height;
         float drawWidth = factionBackground.width * scale;
-        float drawHeight = factionBackground.height * scale;
-        float offsetX = (1434 - drawWidth) / 2;
-        float offsetY = (1075 - drawHeight) / 2;
+        float drawHeight = screenH;
+        float offsetX = (screenW - drawWidth) / 2;
         
         DrawTexturePro(
             factionBackground,
             {0, 0, (float)factionBackground.width, (float)factionBackground.height},
-            {offsetX, offsetY, drawWidth, drawHeight},
-            {0, 0},
-            0.0f,
-            WHITE
+            {offsetX, 0, drawWidth, drawHeight},
+            {0, 0}, 0.0f, WHITE
         );
     }
     
-    // Заголовок
-    DrawText("CHOOSE YOUR FACTION", 420, 150, 30, GOLD);
+    // Заголовок відцентрований
+    const char* title = "CHOOSE YOUR FACTION";
+    int titleWidth = MeasureText(title, 30);
+    DrawText(title, (screenW - titleWidth) / 2, screenH * 0.15f, 30, GOLD);
     
-    // Створюємо динамічні кнопки (без static)
-    DynamicButton romeButton(400, 350, "ROME", 30);
-    DynamicButton carthageButton(400, 460, "CARTHAGE", 30);
-    DynamicButton backButton(400, 650, "BACK", 20);
+    // Створюємо динамічні кнопки відцентровані
+    float centerX = screenW / 2.0f;
+    float startY = screenH * 0.4f;
+    float buttonSpacing = 110;
     
-    // Відцентровуємо кнопки
-    float centerX = 1434.0f / 2.0f;
+    DynamicButton romeButton(0, startY, "ROME", 30);
+    DynamicButton carthageButton(0, startY + buttonSpacing, "CARTHAGE", 30);
+    DynamicButton backButton(0, startY + buttonSpacing * 3, "BACK", 20);
+    
     romeButton.bounds.x = centerX - romeButton.bounds.width / 2.0f;
     carthageButton.bounds.x = centerX - carthageButton.bounds.width / 2.0f;
     backButton.bounds.x = centerX - backButton.bounds.width / 2.0f;
@@ -1657,6 +1717,21 @@ int main() {
     // Завантаження фону вибору фракції
     factionBackground = LoadTexture("assets/Background2.png");
     
+    // Завантаження фону налаштувань
+    settingsBackground = LoadTexture("assets/Settings_background.png");
+    
+    // Завантаження загальної текстури фону (SVG не підтримується, використаємо PNG якщо є)
+    backgroundTexture = LoadTexture("assets/background_texture.png");
+    if (backgroundTexture.id == 0) {
+        // Якщо PNG немає, створюємо fallback текстуру
+        Image fallbackImg = GenImageColor(256, 256, {40, 35, 30, 255});
+        backgroundTexture = LoadTextureFromImage(fallbackImg);
+        UnloadImage(fallbackImg);
+        printf("[TEXTURE] Using fallback background texture\n");
+    } else {
+        printf("[TEXTURE] Background texture loaded: %dx%d\n", backgroundTexture.width, backgroundTexture.height);
+    }
+    
     // Завантаження логотипу
     gameLogo = LoadTexture("assets/sprites/Logo.png");
     if (gameLogo.id > 0) {
@@ -1805,6 +1880,8 @@ int main() {
     }
     UnloadTexture(menuBackground);
     UnloadTexture(factionBackground);
+    UnloadTexture(settingsBackground);
+    UnloadTexture(backgroundTexture);
     if (logoLoaded) UnloadTexture(gameLogo);
     if (fontLoaded) UnloadFont(customFont);
     UnloadTexture(cursorIdle);
