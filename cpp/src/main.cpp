@@ -22,6 +22,7 @@ enum GameState {
     SETTINGS,
     FACTION_SELECT,
     PLAYING,
+    PAUSE_MENU,  // Нове: пауза в грі
     EXIT
 };
 
@@ -57,6 +58,8 @@ DisplaySettings displaySettings;
 
 // Глобальні змінні
 GameState currentState = MENU;
+GameState returnFromSettings = MENU;  // Куди повертатись з налаштувань
+RenderTexture2D gameSnapshot = {0};  // Знімок гри для фону паузи
 Faction playerFaction = ROME; // Фракція гравця
 int rome_food = 200;
 int rome_money = 100;
@@ -82,6 +85,7 @@ MusicState previousMusicState = MUSIC_MENU;
 Texture2D menuBackground;
 Texture2D factionBackground;
 Texture2D settingsBackground;
+Texture2D pauseBackground;    // Фон меню паузи
 Texture2D backgroundTexture;  // Загальна текстура для фону
 bool audioInitialized = false;
 
@@ -926,11 +930,107 @@ void DrawSettings() {
     
     // Обробка кнопки назад
     if (backButton.IsClicked()) {
-        currentState = MENU;
+        currentState = returnFromSettings;  // Повертаємось туди звідки прийшли
     }
     
     // Інструкції
     DrawText("Adjust game settings", 430, 510, 16, GRAY);
+    
+    // Малювання курсора
+    DrawCustomCursor();
+}
+
+// Функція для малювання меню паузи
+void DrawPauseMenu() {
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
+    
+    // Спочатку малюємо замощену текстуру фону (по висоті)
+    if (backgroundTexture.id > 0) {
+        float scale = (float)screenH / backgroundTexture.height;
+        int scaledWidth = backgroundTexture.width * scale;
+        
+        for (int x = 0; x < screenW; x += scaledWidth) {
+            DrawTexturePro(
+                backgroundTexture,
+                {0, 0, (float)backgroundTexture.width, (float)backgroundTexture.height},
+                {(float)x, 0, (float)scaledWidth, (float)screenH},
+                {0, 0}, 0.0f, WHITE
+            );
+        }
+    } else {
+        ClearBackground({40, 35, 30, 255});
+    }
+    
+    // Поверх малюємо основне зображення паузи зі збереженням пропорцій (по висоті)
+    if (pauseBackground.id > 0) {
+        float scale = (float)screenH / pauseBackground.height;
+        float drawWidth = pauseBackground.width * scale;
+        float drawHeight = screenH;
+        float offsetX = (screenW - drawWidth) / 2;
+        
+        DrawTexturePro(
+            pauseBackground,
+            {0, 0, (float)pauseBackground.width, (float)pauseBackground.height},
+            {offsetX, 0, drawWidth, drawHeight},
+            {0, 0}, 0.0f, WHITE
+        );
+    } else {
+        // Fallback - напівпрозоре затемнення
+        DrawRectangle(0, 0, screenW, screenH, {0, 0, 0, 180});
+    }
+    
+    // Заголовок відцентрований
+    const char* title = "PAUSE";
+    int titleWidth = MeasureText(title, 50);
+    DrawText(title, (screenW - titleWidth) / 2, screenH * 0.2f, 50, GOLD);
+    
+    // Створюємо динамічні кнопки відцентровані
+    float centerX = screenW / 2.0f;
+    float startY = screenH * 0.35f;
+    float buttonSpacing = 110;
+    
+    DynamicButton resumeButton(0, startY, "RESUME", 24);
+    DynamicButton settingsButton(0, startY + buttonSpacing, "SETTINGS", 24);
+    DynamicButton mainMenuButton(0, startY + buttonSpacing * 2, "MAIN MENU", 24);
+    DynamicButton exitButton(0, startY + buttonSpacing * 3, "EXIT", 24);
+    
+    resumeButton.bounds.x = centerX - resumeButton.bounds.width / 2.0f;
+    settingsButton.bounds.x = centerX - settingsButton.bounds.width / 2.0f;
+    mainMenuButton.bounds.x = centerX - mainMenuButton.bounds.width / 2.0f;
+    exitButton.bounds.x = centerX - exitButton.bounds.width / 2.0f;
+    
+    // Оновлюємо стан кнопок
+    Vector2 mousePos = GetMousePosition();
+    resumeButton.Update(mousePos);
+    settingsButton.Update(mousePos);
+    mainMenuButton.Update(mousePos);
+    exitButton.Update(mousePos);
+    
+    // Малюємо кнопки
+    resumeButton.Draw();
+    settingsButton.Draw();
+    mainMenuButton.Draw();
+    exitButton.Draw();
+    
+    // Обробка кліків
+    if (resumeButton.IsClicked()) {
+        currentState = PLAYING;
+    }
+    if (settingsButton.IsClicked()) {
+        returnFromSettings = PAUSE_MENU;  // Запам'ятовуємо що повертаємось в паузу
+        currentState = SETTINGS;
+    }
+    if (mainMenuButton.IsClicked()) {
+        currentState = MENU;
+        // Повертаємось до меню музики
+        if (audioInitialized) {
+            SwitchMusic(MUSIC_MENU);
+        }
+    }
+    if (exitButton.IsClicked()) {
+        currentState = EXIT;
+    }
     
     // Малювання курсора
     DrawCustomCursor();
@@ -1021,6 +1121,7 @@ void DrawMenu() {
         currentState = FACTION_SELECT; // Переходимо до вибору фракції
     }
     if (settingsButton.IsClicked()) {
+        returnFromSettings = MENU;  // Запам'ятовуємо що повертаємось в меню
         currentState = SETTINGS;
     }
     if (exitButton.IsClicked()) {
@@ -1676,12 +1777,23 @@ void DrawGame() {
     // Малювання курсора
     DrawCustomCursor();
     
-    // Інструкції
-    DrawText("ESC - Menu | LMB - Select | RMB - Move/Attack/Harvest | Drag - Area | 2xClick - All type", 10, 1040, 14, LIGHTGRAY);
+    // Кнопка меню в правому верхньому куті
+    int screenW = GetScreenWidth();
+    DynamicButton menuButton(screenW - 150, 10, "MENU", 20);
+    Vector2 mousePos = GetMousePosition();
+    menuButton.Update(mousePos);
+    menuButton.Draw();
     
-    // Перевірка виходу в меню
+    if (menuButton.IsClicked()) {
+        currentState = PAUSE_MENU;
+    }
+    
+    // Інструкції
+    DrawText("LMB - Select | RMB - Move/Attack/Harvest | Drag - Area | 2xClick - All type", 10, 1040, 14, LIGHTGRAY);
+    
+    // Перевірка виходу в меню паузи (залишаємо Escape як альтернативу)
     if (IsKeyPressed(KEY_ESCAPE)) {
-        currentState = MENU;
+        currentState = PAUSE_MENU;
     }
 }
 
@@ -1691,6 +1803,7 @@ int main() {
     const int screenHeight = 1075; // 768 * 1.4
     
     InitWindow(screenWidth, screenHeight, "Punic Wars: Castra");
+    SetExitKey(0); // Вимикаємо автоматичне закриття на Escape
     SetTargetFPS(60);
     
     // Ініціалізація аудіо
@@ -1719,6 +1832,14 @@ int main() {
     
     // Завантаження фону налаштувань
     settingsBackground = LoadTexture("assets/Settings_background.png");
+    
+    // Завантаження фону меню паузи
+    pauseBackground = LoadTexture("assets/Pause_background.png");
+    if (pauseBackground.id > 0) {
+        printf("[TEXTURE] Pause background loaded: %dx%d\n", pauseBackground.width, pauseBackground.height);
+    } else {
+        printf("[TEXTURE] Warning: Pause background not loaded!\n");
+    }
     
     // Завантаження загальної текстури фону (SVG не підтримується, використаємо PNG якщо є)
     backgroundTexture = LoadTexture("assets/background_texture.png");
@@ -1818,6 +1939,10 @@ int main() {
     
     printf("[UI] UI systems initialized\n");
     
+    // Створюємо RenderTexture для знімку гри
+    gameSnapshot = LoadRenderTexture(screenWidth, screenHeight);
+    printf("[UI] Game snapshot texture created: %dx%d\n", screenWidth, screenHeight);
+    
     // Перевірка завантаження
     if (menuMusic.frameCount > 0 && ambientMusic[0].frameCount > 0 && 
         battleMusicRome[0].frameCount > 0 && battleMusicCarthage[0].frameCount > 0) {
@@ -1855,6 +1980,9 @@ int main() {
             case PLAYING:
                 DrawGame();
                 break;
+            case PAUSE_MENU:
+                DrawPauseMenu();
+                break;
             case EXIT:
                 break;
         }
@@ -1881,6 +2009,7 @@ int main() {
     UnloadTexture(menuBackground);
     UnloadTexture(factionBackground);
     UnloadTexture(settingsBackground);
+    UnloadTexture(pauseBackground);
     UnloadTexture(backgroundTexture);
     if (logoLoaded) UnloadTexture(gameLogo);
     if (fontLoaded) UnloadFont(customFont);
@@ -1890,6 +2019,11 @@ int main() {
     UnloadTexture(resourcePanel);
     UnloadTexture(buttonBase);
     UnloadTexture(buttonHover);
+    
+    // Вивантаження RenderTexture для знімку гри
+    if (gameSnapshot.id > 0) {
+        UnloadRenderTexture(gameSnapshot);
+    }
     
     // Вивантаження текстур динамічних кнопок
     DynamicButton::UnloadTextures();
