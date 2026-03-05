@@ -300,8 +300,9 @@ struct Building {
                 unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
                 
                 // Малюємо ізометричний ромб навколо будівлі
-                float halfWidth = footprint.col * 32.0f;   // Половина ширини ромба
-                float halfHeight = footprint.row * 16.0f;  // Половина висоти ромба
+                // Збільшуємо розміри щоб покрити весь візуальний спрайт
+                float halfWidth = footprint.col * 48.0f;   // Збільшено з 32 до 48
+                float halfHeight = footprint.row * 24.0f;  // Збільшено з 16 до 24
                 
                 // Точки ромба (верх, право, низ, ліво)
                 Vector2 top = {screenPos.x, screenPos.y - halfHeight};
@@ -316,8 +317,8 @@ struct Building {
                 DrawLineEx(left, top, 2.0f, {255, 255, 0, alpha});
                 
                 // Зовнішній ромб (трохи більший)
-                float outerHalfWidth = halfWidth + 4.0f;
-                float outerHalfHeight = halfHeight + 2.0f;
+                float outerHalfWidth = halfWidth + 6.0f;
+                float outerHalfHeight = halfHeight + 3.0f;
                 Vector2 topOuter = {screenPos.x, screenPos.y - outerHalfHeight};
                 Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y};
                 Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight};
@@ -448,10 +449,10 @@ struct Building {
         
         // Для ізометричного ромба використовуємо формулу:
         // |localX / halfWidth| + |localY / halfHeight| <= 1
-        // Де halfWidth = footprint.col * 32, halfHeight = footprint.row * 16
+        // Збільшуємо розміри щоб відповідати візуальному спрайту
         
-        float halfWidth = footprint.col * 32.0f;   // Половина ширини ромба
-        float halfHeight = footprint.row * 16.0f;  // Половина висоти ромба
+        float halfWidth = footprint.col * 48.0f;   // Збільшено з 32 до 48
+        float halfHeight = footprint.row * 24.0f;  // Збільшено з 16 до 24
         
         // Перевірка чи точка всередині ромба
         float normalized = fabs(localX / halfWidth) + fabs(localY / halfHeight);
