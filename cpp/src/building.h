@@ -286,7 +286,7 @@ struct Building {
                 unsigned char brightness = (unsigned char)(200 + pulse * 55); // 200-255
                 tint = {brightness, brightness, 150, 255}; // Яскраво-жовтий
             }
-            sprite.draw(screenPos, tint, texture_offset);
+            sprite.draw(screenPos, tint);
             
             // DEBUG: Візуалізація області кліку (напівпрозорий жовтий ромб)
             {

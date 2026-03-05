@@ -82,12 +82,12 @@ bool IsometricSprite::isLoaded() const {
     return loaded;
 }
 
-void IsometricSprite::draw(ScreenCoords position, Color tint, Vector2 offset) const {
+void IsometricSprite::draw(ScreenCoords position, Color tint) const {
     if (loaded) {
-        // Draw sprite with anchor at bottom center + custom offset
+        // Draw sprite with anchor at bottom center
         Vector2 drawPos = {
-            position.x - anchorPoint.x + offset.x,
-            position.y - anchorPoint.y + offset.y
+            position.x - anchorPoint.x,
+            position.y - anchorPoint.y
         };
         DrawTextureV(texture, drawPos, tint);
     }
