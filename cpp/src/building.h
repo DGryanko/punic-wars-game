@@ -294,19 +294,39 @@ struct Building {
             }
             sprite.draw(screenPos, tint);
             
-            // Додаткова рамка для вибраної будівлі
+            // Додаткова рамка для вибраної будівлі (ізометричний ромб)
             if (selected) {
                 float pulse = (sin(GetTime() * 3.0f) + 1.0f) / 2.0f;
                 unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
                 
-                // Малюємо рамку навколо будівлі
-                Rectangle rect = getRect();
-                DrawRectangleLines((int)rect.x - 2, (int)rect.y - 2, 
-                                 (int)rect.width + 4, (int)rect.height + 4, 
-                                 {255, 255, 0, alpha});
-                DrawRectangleLines((int)rect.x - 4, (int)rect.y - 4, 
-                                 (int)rect.width + 8, (int)rect.height + 8, 
-                                 {255, 255, 0, (unsigned char)(alpha / 2)});
+                // Малюємо ізометричний ромб навколо будівлі
+                float halfWidth = footprint.col * 32.0f;   // Половина ширини ромба
+                float halfHeight = footprint.row * 16.0f;  // Половина висоти ромба
+                
+                // Точки ромба (верх, право, низ, ліво)
+                Vector2 top = {screenPos.x, screenPos.y - halfHeight};
+                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
+                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
+                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
+                
+                // Внутрішній ромб
+                DrawLineEx(top, right, 2.0f, {255, 255, 0, alpha});
+                DrawLineEx(right, bottom, 2.0f, {255, 255, 0, alpha});
+                DrawLineEx(bottom, left, 2.0f, {255, 255, 0, alpha});
+                DrawLineEx(left, top, 2.0f, {255, 255, 0, alpha});
+                
+                // Зовнішній ромб (трохи більший)
+                float outerHalfWidth = halfWidth + 4.0f;
+                float outerHalfHeight = halfHeight + 2.0f;
+                Vector2 topOuter = {screenPos.x, screenPos.y - outerHalfHeight};
+                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y};
+                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight};
+                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y};
+                
+                DrawLineEx(topOuter, rightOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
+                DrawLineEx(rightOuter, bottomOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
+                DrawLineEx(bottomOuter, leftOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
+                DrawLineEx(leftOuter, topOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
             }
         }
         
