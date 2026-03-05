@@ -294,40 +294,35 @@ struct Building {
             }
             sprite.draw(screenPos, tint);
             
-            // Додаткова рамка для вибраної будівлі (ізометричний ромб)
+            // Додаткова рамка для вибраної будівлі (тільки нижні грані ромба)
             if (selected) {
                 float pulse = (sin(GetTime() * 3.0f) + 1.0f) / 2.0f;
                 unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
                 
-                // Малюємо ізометричний ромб навколо будівлі
-                // Збільшуємо розміри щоб покрити весь візуальний спрайт
-                float halfWidth = footprint.col * 48.0f;   // Збільшено з 32 до 48
-                float halfHeight = footprint.row * 24.0f;  // Збільшено з 16 до 24
+                // Малюємо тільки нижні дві грані ізометричного ромба
+                // Зміщуємо вгору на 20 пікселів щоб вирівняти з основою будівлі
+                float offsetY = -20.0f;
+                float halfWidth = footprint.col * 48.0f;
+                float halfHeight = footprint.row * 24.0f;
                 
-                // Точки ромба (верх, право, низ, ліво)
-                Vector2 top = {screenPos.x, screenPos.y - halfHeight};
-                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
-                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
-                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
+                // Точки ромба (право, низ, ліво)
+                Vector2 right = {screenPos.x + halfWidth, screenPos.y + offsetY};
+                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight + offsetY};
+                Vector2 left = {screenPos.x - halfWidth, screenPos.y + offsetY};
                 
-                // Внутрішній ромб
-                DrawLineEx(top, right, 2.0f, {255, 255, 0, alpha});
+                // Внутрішній ромб (тільки нижні дві лінії)
                 DrawLineEx(right, bottom, 2.0f, {255, 255, 0, alpha});
                 DrawLineEx(bottom, left, 2.0f, {255, 255, 0, alpha});
-                DrawLineEx(left, top, 2.0f, {255, 255, 0, alpha});
                 
-                // Зовнішній ромб (трохи більший)
+                // Зовнішній ромб (тільки нижні дві лінії, трохи більший)
                 float outerHalfWidth = halfWidth + 6.0f;
                 float outerHalfHeight = halfHeight + 3.0f;
-                Vector2 topOuter = {screenPos.x, screenPos.y - outerHalfHeight};
-                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y};
-                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight};
-                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y};
+                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y + offsetY};
+                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight + offsetY};
+                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y + offsetY};
                 
-                DrawLineEx(topOuter, rightOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
                 DrawLineEx(rightOuter, bottomOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
                 DrawLineEx(bottomOuter, leftOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
-                DrawLineEx(leftOuter, topOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
             }
         }
         
@@ -443,9 +438,12 @@ struct Building {
     bool isClicked(Vector2 mousePos) const {
         ScreenCoords screenPos = getScreenPosition();
         
+        // Зміщуємо вгору на 20 пікселів щоб вирівняти з основою будівлі
+        float offsetY = -20.0f;
+        
         // Переводимо mouse position в локальні координати відносно центру будівлі
         float localX = mousePos.x - screenPos.x;
-        float localY = mousePos.y - screenPos.y;
+        float localY = mousePos.y - (screenPos.y + offsetY);
         
         // Для ізометричного ромба використовуємо формулу:
         // |localX / halfWidth| + |localY / halfHeight| <= 1
