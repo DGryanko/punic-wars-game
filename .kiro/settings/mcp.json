@@ -2,10 +2,8 @@
   "mcpServers": {
     "punic-wars-context": {
       "command": "python",
-      "args": ["D:\\GitHub\\Game\\punic_wars_mcp.py"],
-      "env": {
-        "PYTHONPATH": "D:\\GitHub\\Game"
-      },
+      "args": ["punic_wars_mcp.py"],
+      "env": {},
       "disabled": false,
       "autoApprove": [
         "get_project_context",
