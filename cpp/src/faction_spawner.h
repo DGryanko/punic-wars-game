@@ -70,11 +70,26 @@ public:
 private:
     // Знайти випадковий вільний тайл
     GridCoords findRandomFreeTile() const {
+        // HQ має footprint 3x3, тому потрібно залишити місце
+        const int HQ_FOOTPRINT = 3;
+        int maxRow = map->getHeight() - HQ_FOOTPRINT;
+        int maxCol = map->getWidth() - HQ_FOOTPRINT;
+        
         for (int attempt = 0; attempt < config.maxSpawnAttempts; attempt++) {
-            int row = rand() % map->getHeight();
-            int col = rand() % map->getWidth();
+            int row = rand() % maxRow;
+            int col = rand() % maxCol;
             
-            if (map->isPassable(row, col) && placer->isTileFree(row, col)) {
+            // Перевіряємо що всі тайли footprint прохідні та вільні
+            bool allTilesFree = true;
+            for (int r = 0; r < HQ_FOOTPRINT && allTilesFree; r++) {
+                for (int c = 0; c < HQ_FOOTPRINT && allTilesFree; c++) {
+                    if (!map->isPassable(row + r, col + c) || !placer->isTileFree(row + r, col + c)) {
+                        allTilesFree = false;
+                    }
+                }
+            }
+            
+            if (allTilesFree) {
                 return GridCoords(row, col);
             }
         }
@@ -87,14 +102,27 @@ private:
         int attempts = 0;
         int reducedMinDist = minDist;
         
+        // HQ має footprint 3x3, тому потрібно залишити місце
+        const int HQ_FOOTPRINT = 3;
+        int maxRow = map->getHeight() - HQ_FOOTPRINT;
+        int maxCol = map->getWidth() - HQ_FOOTPRINT;
+        
         while (attempts < config.maxSpawnAttempts) {
-            int row = rand() % map->getHeight();
-            int col = rand() % map->getWidth();
+            int row = rand() % maxRow;
+            int col = rand() % maxCol;
             
-            if (map->isPassable(row, col) && placer->isTileFree(row, col)) {
-                if (isMinDistanceSatisfied(from, GridCoords(row, col), reducedMinDist)) {
-                    return GridCoords(row, col);
+            // Перевіряємо що всі тайли footprint прохідні та вільні
+            bool allTilesFree = true;
+            for (int r = 0; r < HQ_FOOTPRINT && allTilesFree; r++) {
+                for (int c = 0; c < HQ_FOOTPRINT && allTilesFree; c++) {
+                    if (!map->isPassable(row + r, col + c) || !placer->isTileFree(row + r, col + c)) {
+                        allTilesFree = false;
+                    }
                 }
+            }
+            
+            if (allTilesFree && isMinDistanceSatisfied(from, GridCoords(row, col), reducedMinDist)) {
+                return GridCoords(row, col);
             }
             
             attempts++;

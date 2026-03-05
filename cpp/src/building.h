@@ -4,6 +4,7 @@
 #include "isometric_sprite.h"
 #include <string>
 #include <vector>
+#include <cmath>
 
 // Фракції
 enum Faction {
@@ -200,10 +201,20 @@ struct Building {
     
     // Перевірка чи займає будівля дану grid клітинку
     bool occupiesGridCell(GridCoords cell) const {
-        return cell.row >= position.row && 
+        bool occupies = cell.row >= position.row && 
                cell.row < position.row + footprint.row &&
                cell.col >= position.col && 
                cell.col < position.col + footprint.col;
+        
+        // Debug: виводимо інформацію про перевірку
+        if (cell.row >= position.row - 5 && cell.row <= position.row + footprint.row + 5 &&
+            cell.col >= position.col - 5 && cell.col <= position.col + footprint.col + 5) {
+            printf("[OCCUPIES] Checking cell (%d, %d) against building at (%d, %d) with footprint (%d, %d): %s\n",
+                   cell.row, cell.col, position.row, position.col, footprint.row, footprint.col,
+                   occupies ? "YES" : "NO");
+        }
+        
+        return occupies;
     }
     
     // Отримати прямокутник для колізій з іншими об'єктами (маленький)
@@ -212,22 +223,22 @@ struct Building {
         return {screenPos.x - 40, screenPos.y - 30, 80, 60};
     }
     
-    // Отримати прямокутник для кліків (враховує текстуру)
+    // Отримати прямокутник для кліків (footprint будівлі в ізометричній проекції)
     Rectangle getRect() const {
         ScreenCoords screenPos = getScreenPosition();
-        if (use_texture) {
-            // Використовуємо розмір текстури для кліків
-            return {
-                screenPos.x + texture_offset.x,
-                screenPos.y + texture_offset.y,
-                384 * texture_scale,  // Ширина текстури
-                224 * texture_scale   // Висота текстури
-            };
-        }
-        // Debug режим - використовуємо footprint
+        
+        // Використовуємо footprint для точної області кліку
+        // Для ізометричної проекції: ширина = footprint.col * 64, висота = footprint.row * 32
         int widthPixels = footprint.col * 64;
         int heightPixels = footprint.row * 32;
-        return {screenPos.x - widthPixels/2, screenPos.y - heightPixels/2, (float)widthPixels, (float)heightPixels};
+        
+        // Центруємо прямокутник відносно позиції будівлі
+        return {
+            screenPos.x - widthPixels / 2.0f,
+            screenPos.y - heightPixels / 2.0f,
+            (float)widthPixels,
+            (float)heightPixels
+        };
     }
     
     // Отримати прямокутник для текстури
@@ -276,9 +287,27 @@ struct Building {
             // Рендеринг спрайту
             Color tint = WHITE;
             if (selected) {
-                tint = {255, 255, 200, 255}; // Жовтуватий відтінок для вибраної
+                // Пульсуюче виділення (яскраве жовте)
+                float pulse = (sin(GetTime() * 3.0f) + 1.0f) / 2.0f; // 0.0 до 1.0
+                unsigned char brightness = (unsigned char)(200 + pulse * 55); // 200-255
+                tint = {brightness, brightness, 150, 255}; // Яскраво-жовтий
             }
             sprite.draw(screenPos, tint);
+            
+            // Додаткова рамка для вибраної будівлі
+            if (selected) {
+                float pulse = (sin(GetTime() * 3.0f) + 1.0f) / 2.0f;
+                unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
+                
+                // Малюємо рамку навколо будівлі
+                Rectangle rect = getRect();
+                DrawRectangleLines((int)rect.x - 2, (int)rect.y - 2, 
+                                 (int)rect.width + 4, (int)rect.height + 4, 
+                                 {255, 255, 0, alpha});
+                DrawRectangleLines((int)rect.x - 4, (int)rect.y - 4, 
+                                 (int)rect.width + 8, (int)rect.height + 8, 
+                                 {255, 255, 0, (unsigned char)(alpha / 2)});
+            }
         }
         
         // Прогрес виробництва (поверх спрайту/debug)
@@ -389,8 +418,24 @@ struct Building {
         return unit;
     }
     
-    // Перевірка кліку
+    // Перевірка кліку по ізометричному ромбу
     bool isClicked(Vector2 mousePos) const {
-        return CheckCollisionPointRec(mousePos, getRect());
+        ScreenCoords screenPos = getScreenPosition();
+        
+        // Переводимо mouse position в локальні координати відносно центру будівлі
+        float localX = mousePos.x - screenPos.x;
+        float localY = mousePos.y - screenPos.y;
+        
+        // Для ізометричного ромба використовуємо формулу:
+        // |localX / halfWidth| + |localY / halfHeight| <= 1
+        // Де halfWidth = footprint.col * 32, halfHeight = footprint.row * 16
+        
+        float halfWidth = footprint.col * 32.0f;   // Половина ширини ромба
+        float halfHeight = footprint.row * 16.0f;  // Половина висоти ромба
+        
+        // Перевірка чи точка всередині ромба
+        float normalized = fabs(localX / halfWidth) + fabs(localY / halfHeight);
+        
+        return normalized <= 1.0f;
     }
 };

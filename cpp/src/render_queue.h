@@ -29,15 +29,19 @@ public:
     }
     
     // Додати юніт до черги
-    void addUnit(int index, GridCoords pos) {
-        int sortKey = pos.row + pos.col;
+    void addUnit(int index, GridCoords pos, ScreenCoords screenPos) {
+        // Використовуємо поточну екранну позицію для точного depth sorting
+        // Конвертуємо екранні координати назад в grid для sortKey
+        GridCoords currentGrid = CoordinateConverter::screenToGrid(screenPos);
+        int sortKey = currentGrid.row + currentGrid.col;
         queue.push_back(RenderableObject(RenderableObject::UNIT, index, sortKey));
     }
     
     // Додати будівлю до черги
     void addBuilding(int index, GridCoords pos, GridCoords footprint) {
-        // Для будівель використовуємо нижній правий кут для сортування
-        int sortKey = (pos.row + footprint.row - 1) + (pos.col + footprint.col - 1);
+        // Для будівель використовуємо верхній лівий кут (базову позицію) для сортування
+        // Це забезпечує правильний depth sorting в ізометричній проекції
+        int sortKey = pos.row + pos.col;
         queue.push_back(RenderableObject(RenderableObject::BUILDING, index, sortKey));
     }
     

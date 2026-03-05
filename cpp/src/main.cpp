@@ -435,14 +435,84 @@ int findUnitAtGrid(GridCoords pos) {
 
 // Знайти будівлю за grid координатами
 int findBuildingAtGrid(GridCoords pos) {
+    printf("[FIND] Looking for building at grid (%d, %d), player faction: %d\n", 
+           pos.row, pos.col, playerFaction);
+    printf("[FIND] Total buildings: %d\n", (int)buildings.size());
+    
     for (int i = 0; i < buildings.size(); i++) {
+        printf("[FIND] Building %d: %s, faction: %d, position: (%d, %d), footprint: (%d, %d)\n",
+               i, buildings[i].name.c_str(), buildings[i].faction,
+               buildings[i].position.row, buildings[i].position.col,
+               buildings[i].footprint.row, buildings[i].footprint.col);
+        
         if (buildings[i].faction == playerFaction) {
             if (buildings[i].occupiesGridCell(pos)) {
+                printf("[FIND] Found matching building at index %d\n", i);
                 return i;
             }
         }
     }
+    printf("[FIND] No building found\n");
     return -1;
+}
+
+// Альтернативний метод: шукати будівлю по світовим координатам (враховує текстуру)
+int findBuildingAtWorldPos(Vector2 worldPos) {
+    printf("[FIND_WORLD] Looking for building at world (%.1f, %.1f), player faction: %d\n", 
+           worldPos.x, worldPos.y, playerFaction);
+    
+    for (int i = 0; i < buildings.size(); i++) {
+        if (buildings[i].faction == playerFaction) {
+            // Отримуємо прямокутник будівлі (враховує текстуру та offset)
+            Rectangle buildingRect = buildings[i].getRect();
+            printf("[FIND_WORLD] Building %d (%s): rect (%.1f, %.1f, %.1f, %.1f)\n",
+                   i, buildings[i].name.c_str(),
+                   buildingRect.x, buildingRect.y, buildingRect.width, buildingRect.height);
+            
+            if (CheckCollisionPointRec(worldPos, buildingRect)) {
+                printf("[FIND_WORLD] Found matching building at index %d\n", i);
+                return i;
+            }
+        }
+    }
+    printf("[FIND_WORLD] No building found\n");
+    return -1;
+}
+
+// Перевірка чи grid клітинка зайнята будівлею
+bool isGridCellOccupiedByBuilding(GridCoords pos) {
+    for (const auto& building : buildings) {
+        if (building.occupiesGridCell(pos)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Перевірка чи шлях до цілі перетинається з будівлею
+bool isPathBlockedByBuilding(GridCoords from, GridCoords to) {
+    // Проста перевірка - чи ціль зайнята будівлею
+    if (isGridCellOccupiedByBuilding(to)) {
+        return true;
+    }
+    
+    // Додаткова перевірка - чи є будівлі між стартом і ціллю
+    // Для простоти перевіряємо тільки цільову позицію та сусідні клітинки
+    for (int dr = -1; dr <= 1; dr++) {
+        for (int dc = -1; dc <= 1; dc++) {
+            GridCoords checkPos = {to.row + dr, to.col + dc};
+            if (isGridCellOccupiedByBuilding(checkPos)) {
+                // Перевіряємо чи ця будівля блокує прямий шлях
+                for (const auto& building : buildings) {
+                    if (building.occupiesGridCell(checkPos) && building.occupiesGridCell(to)) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    
+    return false;
 }
 
 void selectAllUnitsOfType(const std::string& unitType) {
@@ -1270,7 +1340,7 @@ void HandleClicks() {
     Vector2 mousePos = GetMousePosition();
     float currentTime = GetTime();
     
-    // Спочатку перевіряємо клік по панелі замовлення юнітів
+    // Спочатку перевіряємо клік по панелі замовлення юнітів (UI координати, без камери)
     if (unitOrderPanel && unitOrderPanel->isVisible()) {
         unitOrderPanel->handleClick(mousePos);
         // Якщо клік був на панелі, не обробляємо далі
@@ -1281,10 +1351,13 @@ void HandleClicks() {
     }
     
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        // ВАЖЛИВО: Конвертуємо координати миші в світові координати з урахуванням камери
+        Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
+        
         // Початок перетягування для виділення області
         isDragging = true;
-        dragStart = mousePos;
-        dragEnd = mousePos;
+        dragStart = worldMousePos;
+        dragEnd = worldMousePos;
         
         // Перевірка подвійного кліку
         bool isDoubleClick = false;
@@ -1300,15 +1373,15 @@ void HandleClicks() {
             // Скидаємо попередній вибір
             clearAllSelections();
             
-            // НОВИЙ ПІДХІД: Конвертуємо клік в grid координати
-            ScreenCoords screenPos = {mousePos.x, mousePos.y};
+            // НОВИЙ ПІДХІД: Конвертуємо клік в grid координати (використовуємо світові координати)
+            ScreenCoords screenPos = {worldMousePos.x, worldMousePos.y};
             GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
             
-            // Спочатку перевіряємо клік по юнітах (вони менші) - використовуємо screen coords для точності
+            // Спочатку перевіряємо клік по юнітах (вони менші) - використовуємо world coords
             bool foundUnit = false;
             for (int i = 0; i < units.size(); i++) {
                 // Перевіряємо тільки юніти гравця
-                if (units[i].faction == playerFaction && units[i].isClicked(mousePos)) {
+                if (units[i].faction == playerFaction && units[i].isClicked(worldMousePos)) {
                     units[i].selected = true;
                     selectedUnitIndex = i;
                     lastClickedUnit = i;
@@ -1318,15 +1391,33 @@ void HandleClicks() {
                 }
             }
             
-            // Якщо не знайшли юніт, перевіряємо будівлі за grid координатами
+            // Якщо не знайшли юніт, перевіряємо будівлі
             if (!foundUnit) {
-                int buildingIndex = findBuildingAtGrid(gridPos);
+                printf("[CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n", 
+                       mousePos.x, mousePos.y, worldMousePos.x, worldMousePos.y, gridPos.row, gridPos.col);
+                
+                // Спочатку пробуємо знайти по світовим координатам (точніше для текстур)
+                int buildingIndex = findBuildingAtWorldPos(worldMousePos);
+                
+                // Якщо не знайшли, пробуємо по grid координатам
+                if (buildingIndex < 0) {
+                    buildingIndex = findBuildingAtGrid(gridPos);
+                }
+                
+                printf("[CLICK] Found building index: %d\n", buildingIndex);
+                
                 if (buildingIndex >= 0) {
                     buildings[buildingIndex].selected = true;
                     selectedBuildingIndex = buildingIndex;
+                    printf("[CLICK] Selected building: %s at grid (%d, %d)\n", 
+                           buildings[buildingIndex].name.c_str(),
+                           buildings[buildingIndex].position.row,
+                           buildings[buildingIndex].position.col);
+                    
                     // Оновлюємо панель замовлення
                     if (unitOrderPanel) {
                         unitOrderPanel->setSelectedBuilding(buildingIndex);
+                        printf("[CLICK] Updated unit order panel\n");
                     }
                 }
             }
@@ -1335,9 +1426,10 @@ void HandleClicks() {
         lastClickTime = currentTime;
     }
     
-    // Оновлення перетягування
+    // Оновлення перетягування (використовуємо світові координати)
     if (isDragging && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
-        dragEnd = mousePos;
+        Vector2 worldMousePos = GetScreenToWorld2D(GetMousePosition(), mapCamera);
+        dragEnd = worldMousePos;
     }
     
     // Завершення перетягування
@@ -1360,6 +1452,9 @@ void HandleClicks() {
     
     // Правий клік для руху вибраних юнітів або збору ресурсів
     if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+        // ВАЖЛИВО: Конвертуємо координати миші в світові координати з урахуванням камери
+        Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
+        
         bool hasSelectedUnits = false;
         for (const auto& unit : units) {
             if (unit.selected && unit.faction == playerFaction) {
@@ -1369,14 +1464,17 @@ void HandleClicks() {
         }
         
         if (hasSelectedUnits) {
-            // Конвертуємо клік в grid координати для руху
-            ScreenCoords screenPos = {mousePos.x, mousePos.y};
+            // Конвертуємо клік в grid координати для руху (використовуємо світові координати)
+            ScreenCoords screenPos = {worldMousePos.x, worldMousePos.y};
             GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
             
-            // Перевіряємо клік по ворожих юнітах для атаки
+            printf("[RIGHT_CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n",
+                   mousePos.x, mousePos.y, worldMousePos.x, worldMousePos.y, gridPos.row, gridPos.col);
+            
+            // Перевіряємо клік по ворожих юнітах для атаки (використовуємо світові координати)
             bool foundEnemy = false;
             for (int i = 0; i < units.size(); i++) {
-                if (units[i].faction != playerFaction && units[i].isClicked(mousePos)) {
+                if (units[i].faction != playerFaction && units[i].isClicked(worldMousePos)) {
                     // Відправляємо бойових юнітів атакувати
                     for (auto& unit : units) {
                         if (unit.selected && unit.faction == playerFaction && unit.attack_damage > 0) {
@@ -1391,10 +1489,10 @@ void HandleClicks() {
             }
             
             if (!foundEnemy) {
-                // Перевіряємо клік по ресурсах для збирачів
+                // Перевіряємо клік по ресурсах для збирачів (використовуємо світові координати)
                 bool foundResource = false;
                 for (int i = 0; i < resources.size(); i++) {
-                    if (!resources[i].depleted && resources[i].isClicked(mousePos)) {
+                    if (!resources[i].depleted && resources[i].isClicked(worldMousePos)) {
                         // Знаходимо найближчий КВЕСТОРІУМ для здачі ресурсів
                         GridCoords nearestBuildingPos = {-1, -1};
                         float minDist = 999999.0f;
@@ -1447,20 +1545,26 @@ void HandleClicks() {
                 
                 // Якщо не клікнули по ресурсу або ворогу, звичайний рух до grid позиції
                 if (!foundResource) {
-                    // Рухаємо юніти до grid координат
-                    for (int i = 0; i < units.size(); i++) {
-                        if (units[i].selected && units[i].faction == playerFaction) {
-                            // Використовуємо grid координати для руху
-                            units[i].moveTo(gridPos);
-                            units[i].target_unit_id = -1; // Скидаємо ціль атаки
-                            
-                            // Скидаємо призначений ресурс при ручному русі
-                            if (units[i].can_harvest) {
-                                units[i].assigned_resource_x = -1;
-                                units[i].assigned_resource_y = -1;
+                    // Перевіряємо чи ціль не зайнята будівлею або шлях не блокований
+                    if (isPathBlockedByBuilding(units[0].getGridPosition(), gridPos)) {
+                        printf("[MOVE] Cannot move to grid(%d,%d) - blocked by building\n", 
+                               gridPos.row, gridPos.col);
+                    } else {
+                        // Рухаємо юніти до grid координат
+                        for (int i = 0; i < units.size(); i++) {
+                            if (units[i].selected && units[i].faction == playerFaction) {
+                                // Використовуємо grid координати для руху
+                                units[i].moveTo(gridPos);
+                                units[i].target_unit_id = -1; // Скидаємо ціль атаки
+                                
+                                // Скидаємо призначений ресурс при ручному русі
+                                if (units[i].can_harvest) {
+                                    units[i].assigned_resource_x = -1;
+                                    units[i].assigned_resource_y = -1;
+                                }
+                                
+                                printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
                             }
-                            
-                            printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
                         }
                     }
                 }
@@ -1739,7 +1843,7 @@ void DrawGame() {
     
     // Додаємо всі об'єкти до черги
     for (int i = 0; i < units.size(); i++) {
-        renderQueue.addUnit(i, units[i].getGridPosition());
+        renderQueue.addUnit(i, units[i].getGridPosition(), units[i].getScreenPosition());
     }
     
     for (int i = 0; i < buildings.size(); i++) {
@@ -1753,6 +1857,18 @@ void DrawGame() {
     // Сортуємо та рендеримо в правильному порядку (back-to-front)
     renderQueue.sort();
     renderQueue.render(units, buildings, resources);
+    
+    // Малювання області виділення (всередині режиму камери, бо координати світові)
+    if (isDragging) {
+        Rectangle selectionRect = {
+            (float)fmin(dragStart.x, dragEnd.x),
+            (float)fmin(dragStart.y, dragEnd.y),
+            (float)fabs(dragEnd.x - dragStart.x),
+            (float)fabs(dragEnd.y - dragStart.y)
+        };
+        DrawRectangleLines((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, YELLOW);
+        DrawRectangle((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, {255, 255, 0, 50});
+    }
     
     // Кінець режиму 2D камери
     EndMode2D();
@@ -1807,18 +1923,6 @@ void DrawGame() {
             info += " - AI controlled";
         }
         DrawText(info.c_str(), 10, 50, 14, YELLOW);
-    }
-    
-    // Малювання області виділення
-    if (isDragging) {
-        Rectangle selectionRect = {
-            (float)fmin(dragStart.x, dragEnd.x),
-            (float)fmin(dragStart.y, dragEnd.y),
-            (float)fabs(dragEnd.x - dragStart.x),
-            (float)fabs(dragEnd.y - dragStart.y)
-        };
-        DrawRectangleLines((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, YELLOW);
-        DrawRectangle((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, {255, 255, 0, 50});
     }
     
     // Панель замовлення юнітів (нова система)

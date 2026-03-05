@@ -25,7 +25,7 @@ struct Unit {
     std::string unit_type;       // Тип юніта
     bool selected = false;       // Чи вибраний юніт
     bool is_moving = false;      // Чи рухається юніт
-    float speed = 0.85f;         // Швидкість руху (зменшено вдвоє з 1.7f)
+    float speed = 0.35f;         // Швидкість руху
     
     // Isometric sprite system
     IsometricSprite sprite;      // Спрайт юніта
@@ -96,21 +96,21 @@ struct Unit {
         // Встановлення характеристик залежно від типу
         if (type == "legionary") {
             hp = max_hp = 100;
-            speed = 0.85f;
+            speed = 0.35f;  // Швидкість руху
             can_harvest = false; // Легіонери не збирають ресурси
             attack_damage = 25;
             attack_range = 30.0f;
             attack_cooldown = 1.5f;
         } else if (type == "phoenician") {
             hp = max_hp = 90;
-            speed = 0.85f;
+            speed = 0.35f;  // Швидкість руху
             can_harvest = false; // Фінікійці не збирають ресурси
             attack_damage = 30;
             attack_range = 25.0f;
             attack_cooldown = 1.2f;
         } else if (type == "slave") {
             hp = max_hp = 50;
-            speed = 0.6f; // Раби повільніші (зменшено вдвоє з 1.2f)
+            speed = 0.25f;  // Раби повільніші
             can_harvest = true; // Раби збирають ресурси
             max_carry_capacity = 15;
             attack_damage = 5; // Слабкі в бою
@@ -161,25 +161,37 @@ struct Unit {
             }
         }
         
-        // Рух між grid позиціями з інтерполяцією
+        // Рух між grid позиціями з постійною швидкістю
         if (is_moving && !is_attacking) {
             if (!(position == target_position)) {
-                // Інтерполяція між поточною та цільовою позицією
-                interpolation_progress += speed * deltaTime * 2.0f; // Швидкість інтерполяції
+                // Рухаємося з постійною швидкістю в пікселях за секунду
+                ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
                 
-                if (interpolation_progress >= 1.0f) {
-                    // Досягли цільової позиції
-                    position = target_position;
-                    interpolation_progress = 1.0f;
-                    current_screen_pos = CoordinateConverter::gridToScreen(position);
-                    is_moving = false;
-                } else {
-                    // Плавна інтерполяція екранної позиції
-                    ScreenCoords startScreen = CoordinateConverter::gridToScreen(position);
-                    ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
+                // Обчислюємо відстань до цілі
+                float dx = targetScreen.x - current_screen_pos.x;
+                float dy = targetScreen.y - current_screen_pos.y;
+                float distance = sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0.1f) {
+                    // Нормалізуємо напрямок і рухаємося з постійною швидкістю
+                    float moveDistance = speed * deltaTime * 100.0f; // 100 пікселів/сек при speed=1.0
                     
-                    current_screen_pos.x = startScreen.x + (targetScreen.x - startScreen.x) * interpolation_progress;
-                    current_screen_pos.y = startScreen.y + (targetScreen.y - startScreen.y) * interpolation_progress;
+                    if (moveDistance >= distance) {
+                        // Досягли цільової позиції
+                        position = target_position;
+                        current_screen_pos = targetScreen;
+                        is_moving = false;
+                    } else {
+                        // Рухаємося до цілі
+                        float ratio = moveDistance / distance;
+                        current_screen_pos.x += dx * ratio;
+                        current_screen_pos.y += dy * ratio;
+                    }
+                } else {
+                    // Вже на місці
+                    position = target_position;
+                    current_screen_pos = targetScreen;
+                    is_moving = false;
                 }
             } else {
                 is_moving = false;
@@ -222,15 +234,27 @@ struct Unit {
     void makeAIDecision() {
         if (!is_moving) {
             // Простий AI: рухатися в випадковому напрямку в grid координатах
-            // Припускаємо карту 50x50 тайлів
-            int random_row = rand() % 50;
-            int random_col = rand() % 50;
+            // Карта 80x80 тайлів
+            int random_row = rand() % 80;
+            int random_col = rand() % 80;
             moveTo(GridCoords(random_row, random_col));
         }
     }
     
     // Встановити ціль для руху (grid coordinates)
     void moveTo(GridCoords newPos) {
+        // Перевірка меж мапи (80x80)
+        const int MAP_SIZE = 80;
+        if (newPos.row < 0 || newPos.row >= MAP_SIZE || 
+            newPos.col < 0 || newPos.col >= MAP_SIZE) {
+            printf("[MOVETO] Target position (%d,%d) is out of map bounds (0-79), ignoring\n", 
+                   newPos.row, newPos.col);
+            return;
+        }
+        
+        // ВАЖЛИВО: Не перевіряємо колізії тут, бо будівлі займають багато клітинок
+        // Pathfinding система має обходити будівлі
+        
         target_position = newPos;
         interpolation_progress = 0.0f;
         is_moving = true;
