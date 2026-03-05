@@ -40,16 +40,3 @@ if %ERRORLEVEL% EQU 0 (
     echo.
     echo Compilation failed!
 )
-
-pause
-
-if %ERRORLEVEL% EQU 0 (
-    echo.
-    echo Compilation successful!
-    echo Run: tilemap_test.exe
-) else (
-    echo.
-    echo Compilation failed!
-)
-
-pause

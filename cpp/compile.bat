@@ -23,5 +23,3 @@ if exist "punic_wars.exe" (
 ) else (
     echo Compilation failed. Please check SETUP.md for installation instructions.
 )
-
-pause
