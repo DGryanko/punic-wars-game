@@ -68,24 +68,8 @@ struct Building {
         useDebugRendering = true; // За замовчуванням використовуємо debug
         
         // Встановлення footprint залежно від типу
-        switch (type) {
-            case HQ_ROME:
-            case HQ_CARTHAGE:
-                footprint = {3, 3}; // 3x3 тайли
-                break;
-            case BARRACKS_ROME:
-            case BARRACKS_CARTHAGE:
-            case QUESTORIUM_ROME:
-            case LIBTENT_1:
-            case LIBTENT_2:
-            case LIBTENT_3:
-            case TENTORIUM:
-                footprint = {2, 2}; // 2x2 тайли
-                break;
-            default:
-                footprint = {1, 1}; // 1x1 тайл
-                break;
-        }
+        // Всі будівлі мають основу 2x2 тайли
+        footprint = {2, 2};
         
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
@@ -132,47 +116,47 @@ struct Building {
         switch (type) {
             case HQ_ROME:
                 name = "Praetorium";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;           // Повний розмір (384x224)
                 break;
             case HQ_CARTHAGE:
                 name = "Main Tent";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case BARRACKS_ROME:
                 name = "Contubernium";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case BARRACKS_CARTHAGE:
                 name = "Mercenary Camp";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case QUESTORIUM_ROME:
                 name = "Questorium";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_1:
                 name = "Libyan Tent I";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_2:
                 name = "Libyan Tent II";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_3:
                 name = "Libyan Tent III";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case TENTORIUM:
                 name = "Tentorium";
-                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
+                texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
         }
@@ -217,10 +201,20 @@ struct Building {
         return occupies;
     }
     
-    // Отримати прямокутник для колізій з іншими об'єктами (маленький)
+    // Отримати прямокутник для колізій з іншими об'єктами
     Rectangle getCollisionRect() const {
         ScreenCoords screenPos = getScreenPosition();
-        return {screenPos.x - 40, screenPos.y - 30, 80, 60};
+        // Використовуємо розміри тайлів з CoordinateConverter
+        float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
+        float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
+        
+        // Прямокутник що приблизно відповідає ромбу
+        return {
+            screenPos.x - halfWidth, 
+            screenPos.y - halfHeight, 
+            halfWidth * 2, 
+            halfHeight * 2
+        };
     }
     
     // Отримати прямокутник для кліків (footprint будівлі в ізометричній проекції)
@@ -292,7 +286,24 @@ struct Building {
                 unsigned char brightness = (unsigned char)(200 + pulse * 55); // 200-255
                 tint = {brightness, brightness, 150, 255}; // Яскраво-жовтий
             }
-            sprite.draw(screenPos, tint);
+            sprite.draw(screenPos, tint, texture_offset);
+            
+            // DEBUG: Візуалізація області кліку (напівпрозорий жовтий ромб)
+            {
+                // Використовуємо розміри тайлів з CoordinateConverter
+                float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
+                float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
+                
+                // Малюємо заповнений ромб
+                Vector2 top = {screenPos.x, screenPos.y - halfHeight};
+                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
+                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
+                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
+                
+                // Малюємо трикутники для заповнення ромба
+                DrawTriangle(top, right, bottom, {255, 255, 0, 50});
+                DrawTriangle(top, bottom, left, {255, 255, 0, 50});
+            }
             
             // Додаткова рамка для вибраної будівлі (тільки нижні грані ромба)
             if (selected) {
@@ -300,15 +311,13 @@ struct Building {
                 unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
                 
                 // Малюємо тільки нижні дві грані ізометричного ромба
-                // Зміщуємо вгору на 20 пікселів щоб вирівняти з основою будівлі
-                float offsetY = -20.0f;
-                float halfWidth = footprint.col * 48.0f;
-                float halfHeight = footprint.row * 24.0f;
+                float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
+                float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
                 
                 // Точки ромба (право, низ, ліво)
-                Vector2 right = {screenPos.x + halfWidth, screenPos.y + offsetY};
-                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight + offsetY};
-                Vector2 left = {screenPos.x - halfWidth, screenPos.y + offsetY};
+                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
+                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
+                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
                 
                 // Внутрішній ромб (тільки нижні дві лінії)
                 DrawLineEx(right, bottom, 2.0f, {255, 255, 0, alpha});
@@ -317,9 +326,9 @@ struct Building {
                 // Зовнішній ромб (тільки нижні дві лінії, трохи більший)
                 float outerHalfWidth = halfWidth + 6.0f;
                 float outerHalfHeight = halfHeight + 3.0f;
-                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y + offsetY};
-                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight + offsetY};
-                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y + offsetY};
+                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y};
+                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight};
+                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y};
                 
                 DrawLineEx(rightOuter, bottomOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
                 DrawLineEx(bottomOuter, leftOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
@@ -438,19 +447,16 @@ struct Building {
     bool isClicked(Vector2 mousePos) const {
         ScreenCoords screenPos = getScreenPosition();
         
-        // Зміщуємо вгору на 20 пікселів щоб вирівняти з основою будівлі
-        float offsetY = -20.0f;
-        
         // Переводимо mouse position в локальні координати відносно центру будівлі
         float localX = mousePos.x - screenPos.x;
-        float localY = mousePos.y - (screenPos.y + offsetY);
+        float localY = mousePos.y - screenPos.y;
         
         // Для ізометричного ромба використовуємо формулу:
         // |localX / halfWidth| + |localY / halfHeight| <= 1
-        // Збільшуємо розміри щоб відповідати візуальному спрайту
+        // Використовуємо розміри тайлів з CoordinateConverter
         
-        float halfWidth = footprint.col * 48.0f;   // Збільшено з 32 до 48
-        float halfHeight = footprint.row * 24.0f;  // Збільшено з 16 до 24
+        float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
+        float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
         
         // Перевірка чи точка всередині ромба
         float normalized = fabs(localX / halfWidth) + fabs(localY / halfHeight);

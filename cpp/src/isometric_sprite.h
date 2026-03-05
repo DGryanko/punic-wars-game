@@ -38,8 +38,8 @@ public:
     int getWidth() const { return width; }
     int getHeight() const { return height; }
     
-    // Draw sprite at screen position
-    void draw(ScreenCoords position, Color tint = WHITE) const;
+    // Draw sprite at screen position with optional offset
+    void draw(ScreenCoords position, Color tint = WHITE, Vector2 offset = {0, 0}) const;
     
     // Debug rendering functions
     static void drawDebugUnit(ScreenCoords pos, Color color, const char* label);
