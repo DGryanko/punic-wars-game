@@ -777,7 +777,7 @@ void InitResources() {
 void SpawnUnit(const Building& building, const std::string& unitType) {
     Unit newUnit;
     
-    // Початкова позиція - праворуч від будівлі
+    // Початкова позиція - праворуч від будівлі (screen coords)
     int spawnX = building.x + 90;
     int spawnY = building.y + 30;
     
@@ -808,10 +808,13 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     // Визначаємо, чи має юніт керуватися AI
     bool isAI = (building.faction != playerFaction);
     
-    newUnit.init(unitType, building.faction, spawnX, spawnY, isAI);
+    // Конвертуємо screen coords в grid coords для нової системи
+    GridCoords spawnGridPos = CoordinateConverter::screenToGrid(ScreenCoords(spawnX, spawnY));
+    newUnit.init(unitType, building.faction, spawnGridPos, isAI);
     units.push_back(newUnit);
     
-    printf("[SPAWN] Unit spawned at (%d, %d)\n", spawnX, spawnY);
+    printf("[SPAWN] Unit spawned at grid(%d, %d) screen(%d, %d)\n", 
+           spawnGridPos.row, spawnGridPos.col, spawnX, spawnY);
 }
 
 // Функція для малювання меню налаштувань

@@ -517,7 +517,64 @@ python punic_wars_mcp.py
 **Нові ресурси:**
 - `assets/Pause_background.png` - фон меню паузи
 
-**Наступний крок**: Реалізація специфікації ізометрії або додавання нового контенту
+**Наступний крок**: Продовження ізометричної адаптації - Building та ResourcePoint класи
+
+## ЗМІНИ В СЕСІЇ 10 (ПОЧАТОК ІЗОМЕТРИЧНОЇ АДАПТАЦІЇ) 🆕
+1. ✅ Створено IsometricSprite систему
+   - `cpp/src/isometric_sprite.h` та `cpp/src/isometric_sprite.cpp`
+   - Завантаження спрайтів з автоматичним fallback на debug режим
+   - Debug рендеринг: діаманти для юнітів, прямокутники для будівель, квадрати для ресурсів
+   - Anchor point система (bottom center для правильного позиціонування)
+2. ✅ Створено Compatibility Layer для Unit class
+   - Додано публічні змінні `x, y, target_x, target_y` для сумісності зі старим кодом
+   - Автоматична синхронізація між GridCoords та screen coordinates
+   - Метод `syncScreenCoords()` викликається після кожного руху
+   - Нуль breaking changes - весь старий код працює без змін
+3. ✅ Оновлено Unit class для GridCoords
+   - `position` та `target_position` тепер GridCoords
+   - `current_screen_pos` для плавної інтерполяції
+   - Compatibility методи: `moveTo(int, int)` та `moveTo(GridCoords)`
+   - Інтегровано IsometricSprite з debug fallback
+   - Debug рендеринг: діаманти з кольорами фракцій (RED/BLUE/YELLOW)
+4. ✅ Оновлено компіляцію
+   - Додано `src\isometric_sprite.cpp` до `compile.bat`
+   - Компіляція успішна без помилок
+   - Гра запускається коректно
+5. ✅ Оновлено SpawnUnit функцію
+   - Конвертація screen coords → grid coords при створенні юнітів
+   - Логування обох систем координат для debug
+
+**Створені файли:**
+- `cpp/src/isometric_sprite.h` - IsometricSprite клас
+- `cpp/src/isometric_sprite.cpp` - реалізація IsometricSprite
+- `.kiro/specs/isometric-adaptation/SESSION_10_PROGRESS.md` - детальний прогрес
+
+**Оновлені файли:**
+- `cpp/src/unit.h` - GridCoords + compatibility layer
+- `cpp/src/main.cpp` - SpawnUnit з grid coords
+- `cpp/compile.bat` - додано isometric_sprite.cpp
+
+**Архітектурні рішення:**
+- **Compatibility Layer Pattern** - дозволяє старому коду працювати під час міграції
+- **Debug-First Approach** - спочатку debug рендеринг, потім спрайти
+- **Поступова міграція** - можна оновлювати систему по частинах
+
+**Що працює:**
+- IsometricSprite система з debug fallback ✅
+- Unit class з GridCoords + compatibility ✅
+- Компіляція без помилок ✅
+- Гра запускається ✅
+- Debug рендеринг (діаманти для юнітів) ✅
+
+**Що залишилось:**
+- Building class → GridCoords
+- ResourcePoint class → GridCoords
+- RenderQueue для depth sorting
+- Mouse interaction з grid coords
+- Building placement з grid snapping
+- Pathfinding інтеграція
+
+**Наступний крок**: Продовження ізометричної адаптації - Building та ResourcePoint класи
 
 ## ЗМІНИ В СЕСІЇ 9 (ОЧИЩЕННЯ ПРОЄКТУ ВІД SDL2) 🆕
 1. ✅ Створено повну специфікацію cleanup системи
@@ -588,5 +645,5 @@ python punic_wars_mcp.py
 6. **Умови перемоги/поразки** - завершення гри
 
 ---
-**Останнє оновлення**: Сесія 9 завершена (Очищення проєкту від SDL2)
-**Статус**: ✅ Повністю функціональна RTS гра з інтегрованою ізометричною картою, готовою специфікацією для повної адаптації під ізометрію, та очищеним проєктом без застарілих SDL2 файлів
+**Останнє оновлення**: Сесія 10 завершена (Початок ізометричної адаптації)
+**Статус**: ✅ Повністю функціональна RTS гра з інтегрованою ізометричною картою, готовою специфікацією для повної адаптації під ізометрію, очищеним проєктом без застарілих SDL2 файлів, та **ПОЧАТКОМ ІЗОМЕТРИЧНОЇ АДАПТАЦІЇ** з IsometricSprite системою та GridCoords для юнітів

@@ -6,52 +6,52 @@
 
 ## Tasks
 
-- [ ] 1. Create IsometricSprite class
+- [x] 1. Create IsometricSprite class
   - Create `src/isometric_sprite.h` and `src/isometric_sprite.cpp`
   - Implement texture loading with fallback to debug mode
   - Implement render methods for sprites and debug shapes
   - _Requirements: 2.2, 2.3, 5.1, 5.2_
 
-- [ ] 2. Implement debug rendering functions
-  - [ ] 2.1 Create debug unit rendering (diamond shape)
+- [x] 2. Implement debug rendering functions
+  - [x] 2.1 Create debug unit rendering (diamond shape)
     - Draw 32x16 pixel isometric diamond
     - Color based on faction (RED/BLUE/YELLOW)
     - Add black outline for visibility
     - Display unit type label above shape
     - _Requirements: 5.2, 5.3, 5.4_
   
-  - [ ] 2.2 Create debug building rendering (rectangle)
+  - [x] 2.2 Create debug building rendering (rectangle)
     - Draw isometric rectangle based on footprint
     - Color based on building type
     - Add type label
     - _Requirements: 3.2, 3.3, 5.3_
   
-  - [ ] 2.3 Create debug resource rendering (square with letter)
+  - [x] 2.3 Create debug resource rendering (square with letter)
     - Draw 24x24 square
     - Add letter (F for food, G for gold)
     - Color: GREEN for food, GOLD for gold
     - _Requirements: 9.3, 5.3_
 
-- [ ] 3. Update Unit class for grid coordinates
-  - [ ] 3.1 Replace float x, y with GridCoords position
+- [-] 3. Update Unit class for grid coordinates
+  - [x] 3.1 Replace float x, y with GridCoords position
     - Change member variable from `float x, y` to `GridCoords position`
     - Update constructor to accept GridCoords
     - Add getScreenPosition() method
     - _Requirements: 1.1, 1.4_
   
-  - [ ] 3.2 Add IsometricSprite member and loading
+  - [x] 3.2 Add IsometricSprite member and loading
     - Add `IsometricSprite sprite` member
     - Load sprite in constructor from `assets/sprites/isometric/units/`
     - Fall back to debug rendering if sprite not found
     - _Requirements: 2.1, 2.2, 5.1, 12.1, 12.2_
   
-  - [ ] 3.3 Update render() method
+  - [x] 3.3 Update render() method
     - Convert grid position to screen coordinates
     - If sprite loaded, render sprite
     - Else render debug diamond
     - _Requirements: 2.1, 2.2, 2.3, 2.4_
   
-  - [ ] 3.4 Update movement logic for grid
+  - [-] 3.4 Update movement logic for grid
     - Update moveTo() to work with GridCoords
     - Keep interpolation for smooth movement
     - Update pathfinding integration

@@ -1,19 +1,35 @@
 #pragma once
 #include "raylib.h"
 #include "building.h" // Для Faction enum
+#include "tilemap/coordinates.h"
+#include "isometric_sprite.h"
 #include <string>
 #include <cmath>
 
 // Структура юніта
 struct Unit {
-    int x, y;                    // Поточні координати
-    int target_x, target_y;      // Цільові координати для руху
+    // НОВИЙ ПІДХІД: Grid coordinates (ізометрична система)
+    GridCoords position;         // Поточні координати в сітці
+    GridCoords target_position;  // Цільові координати для руху
+    
+    // Для плавної інтерполяції між тайлами
+    float interpolation_progress; // 0.0 - 1.0
+    ScreenCoords current_screen_pos; // Поточна екранна позиція для плавного руху
+    
+    // COMPATIBILITY LAYER: Публічні змінні для старого коду
+    // Ці змінні автоматично синхронізуються з grid координатами
+    int x, y;                    // Screen coordinates (deprecated, але працюють)
+    int target_x, target_y;      // Target screen coordinates (deprecated)
     int hp, max_hp;              // Здоров'я
     Faction faction;             // Фракція
     std::string unit_type;       // Тип юніта
     bool selected = false;       // Чи вибраний юніт
     bool is_moving = false;      // Чи рухається юніт
     float speed = 0.85f;         // Швидкість руху (зменшено вдвоє з 1.7f)
+    
+    // Isometric sprite system
+    IsometricSprite sprite;      // Спрайт юніта
+    bool useDebugRendering;      // Чи використовувати debug режим
     
     // AI поведінка
     bool is_ai_controlled = false; // Чи керується AI
@@ -48,16 +64,34 @@ struct Unit {
     bool usePathfinding = true;       // Чи використовувати pathfinding
     
     // Ініціалізація юніта
-    void init(std::string type, Faction unitFaction, int posX, int posY, bool aiControlled = false) {
+    void init(std::string type, Faction unitFaction, GridCoords startPos, bool aiControlled = false) {
         unit_type = type;
         faction = unitFaction;
-        x = posX;
-        y = posY;
-        target_x = posX;
-        target_y = posY;
+        position = startPos;
+        target_position = startPos;
+        interpolation_progress = 1.0f; // Початково не рухається
+        current_screen_pos = CoordinateConverter::gridToScreen(position);
         is_moving = false;
         is_ai_controlled = aiControlled;
         ai_timer = 0.0f;
+        useDebugRendering = true; // За замовчуванням використовуємо debug
+        
+        // COMPATIBILITY: Синхронізуємо screen coordinates
+        syncScreenCoords();
+        
+        // Спроба завантажити спрайт
+        std::string spritePath = "assets/sprites/isometric/units/" + type + "_";
+        if (unitFaction == ROME) {
+            spritePath += "rome.png";
+        } else {
+            spritePath += "carthage.png";
+        }
+        
+        if (sprite.loadFromFile(spritePath.c_str())) {
+            useDebugRendering = false;
+        } else {
+            TraceLog(LOG_INFO, "[UNIT] Using debug rendering for %s", type.c_str());
+        }
         
         // Встановлення характеристик залежно від типу
         if (type == "legionary") {
@@ -85,13 +119,34 @@ struct Unit {
         }
     }
     
+    // COMPATIBILITY LAYER: Синхронізація screen coordinates з grid coordinates
+    void syncScreenCoords() {
+        ScreenCoords screen = CoordinateConverter::gridToScreen(position);
+        x = (int)screen.x;
+        y = (int)screen.y;
+        ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
+        target_x = (int)targetScreen.x;
+        target_y = (int)targetScreen.y;
+    }
+    
+    // Отримати екранну позицію з grid координат
+    ScreenCoords getScreenPosition() const {
+        return current_screen_pos;
+    }
+    
+    // Отримати grid позицію
+    GridCoords getGridPosition() const {
+        return position;
+    }
+    
     // Оновлення юніта (рух та AI)
     void update() {
         float currentTime = GetTime();
+        float deltaTime = GetFrameTime();
         
         // AI поведінка
         if (is_ai_controlled) {
-            ai_timer += GetFrameTime();
+            ai_timer += deltaTime;
             if (ai_timer >= ai_decision_interval) {
                 ai_timer = 0.0f;
                 makeAIDecision();
@@ -106,41 +161,42 @@ struct Unit {
             }
         }
         
-        // Рух з pathfinding або старим способом
+        // Рух між grid позиціями з інтерполяцією
         if (is_moving && !is_attacking) {
-            if (usePathfinding && hasPath()) {
-                // Використовуємо pathfinding
-                followPath(GetFrameTime());
-                checkIfStuck(GetFrameTime());
-            } else {
-                // Старий спосіб руху (для сумісності)
-                float dx = target_x - x;
-                float dy = target_y - y;
-                float distance = sqrt(dx * dx + dy * dy);
+            if (!(position == target_position)) {
+                // Інтерполяція між поточною та цільовою позицією
+                interpolation_progress += speed * deltaTime * 2.0f; // Швидкість інтерполяції
                 
-                if (distance < speed + 1.0f) {
-                    x = target_x;
-                    y = target_y;
+                if (interpolation_progress >= 1.0f) {
+                    // Досягли цільової позиції
+                    position = target_position;
+                    interpolation_progress = 1.0f;
+                    current_screen_pos = CoordinateConverter::gridToScreen(position);
                     is_moving = false;
                 } else {
-                    float move_x = (dx / distance) * speed;
-                    float move_y = (dy / distance) * speed;
+                    // Плавна інтерполяція екранної позиції
+                    ScreenCoords startScreen = CoordinateConverter::gridToScreen(position);
+                    ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
                     
-                    int new_x = x + (int)round(move_x);
-                    int new_y = y + (int)round(move_y);
-                    
-                    x = new_x;
-                    y = new_y;
+                    current_screen_pos.x = startScreen.x + (targetScreen.x - startScreen.x) * interpolation_progress;
+                    current_screen_pos.y = startScreen.y + (targetScreen.y - startScreen.y) * interpolation_progress;
                 }
+            } else {
+                is_moving = false;
             }
         }
+        
+        // COMPATIBILITY: Синхронізуємо screen coordinates після руху
+        syncScreenCoords();
     }
     
     // Атакувати ціль
     bool attackTarget(Unit& target) {
         float currentTime = GetTime();
         if (attack_damage > 0 && currentTime - last_attack_time >= attack_cooldown) {
-            float distance = sqrt(pow(x - target.x, 2) + pow(y - target.y, 2));
+            ScreenCoords myPos = getScreenPosition();
+            ScreenCoords targetPos = target.getScreenPosition();
+            float distance = sqrt(pow(myPos.x - targetPos.x, 2) + pow(myPos.y - targetPos.y, 2));
             if (distance <= attack_range) {
                 target.takeDamage(attack_damage);
                 last_attack_time = currentTime;
@@ -165,40 +221,48 @@ struct Unit {
     // AI прийняття рішень
     void makeAIDecision() {
         if (!is_moving) {
-            // Простий AI: рухатися в випадковому напрямку
-            int random_x = 100 + rand() % 824; // В межах карти
-            int random_y = 100 + rand() % 568;
-            moveTo(random_x, random_y);
+            // Простий AI: рухатися в випадковому напрямку в grid координатах
+            // Припускаємо карту 50x50 тайлів
+            int random_row = rand() % 50;
+            int random_col = rand() % 50;
+            moveTo(GridCoords(random_row, random_col));
         }
     }
     
-    // Встановити ціль для руху
-    void moveTo(int newX, int newY) {
-        target_x = newX;
-        target_y = newY;
+    // Встановити ціль для руху (grid coordinates)
+    void moveTo(GridCoords newPos) {
+        target_position = newPos;
+        interpolation_progress = 0.0f;
         is_moving = true;
         is_harvesting = false; // ВАЖЛИВО: припинити збір при русі
-        printf("[MOVETO] Unit at (%d,%d) moving to (%d,%d), is_moving=true\n", x, y, newX, newY);
+        syncScreenCoords(); // COMPATIBILITY: Оновити screen coords
+        printf("[MOVETO] Unit at (%d,%d) moving to (%d,%d), is_moving=true\n", 
+               position.row, position.col, newPos.row, newPos.col);
     }
     
-    // Встановити шлях для pathfinding
+    // COMPATIBILITY: Встановити ціль для руху (screen coordinates - старий API)
+    void moveTo(int screen_x, int screen_y) {
+        GridCoords gridPos = CoordinateConverter::screenToGrid(ScreenCoords(screen_x, screen_y));
+        moveTo(gridPos);
+    }
+    
+    // Встановити ціль для руху (screen coordinates - конвертує в grid)
+    void moveToScreen(ScreenCoords screenPos) {
+        GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
+        moveTo(gridPos);
+    }
+    
+    // Встановити шлях для pathfinding (simplified - disabled for now)
     void setPath(const std::vector<Vector2>& newPath) {
-        path = newPath;
-        currentWaypointIndex = 0;
-        stuckTimer = 0.0f;
-        unstuckAttempts = 0;
-        lastPosition = {(float)x, (float)y};
-        
-        if (!path.empty()) {
-            is_moving = true;
-            target_x = (int)path[0].x;
-            target_y = (int)path[0].y;
-        }
+        // TODO: Update pathfinding to work with GridCoords
+        // For now, pathfinding is disabled
+        path.clear();
+        printf("[PATHFINDING] Pathfinding temporarily disabled during grid coord migration\n");
     }
     
     // Перевірити чи є шлях
     bool hasPath() const {
-        return !path.empty() && currentWaypointIndex < path.size();
+        return false; // Disabled during migration
     }
     
     // Очистити шлях
@@ -218,8 +282,8 @@ struct Unit {
         Vector2 waypoint = path[currentWaypointIndex];
         
         // Обчислюємо відстань до точки
-        float dx = waypoint.x - x;
-        float dy = waypoint.y - y;
+        float dx = waypoint.x - (float)x;
+        float dy = waypoint.y - (float)y;
         float distance = sqrt(dx * dx + dy * dy);
         
         // Якщо досягли точки, переходимо до наступної
@@ -228,8 +292,7 @@ struct Unit {
             
             if (currentWaypointIndex >= path.size()) {
                 // Досягли кінця шляху
-                x = (int)waypoint.x;
-                y = (int)waypoint.y;
+                moveTo((int)waypoint.x, (int)waypoint.y); // COMPATIBILITY: використовуємо screen coords
                 is_moving = false;
                 clearPath();
                 return;
@@ -237,18 +300,10 @@ struct Unit {
             
             // Оновлюємо ціль до наступної точки
             waypoint = path[currentWaypointIndex];
-            target_x = (int)waypoint.x;
-            target_y = (int)waypoint.y;
+            moveTo((int)waypoint.x, (int)waypoint.y); // COMPATIBILITY
         }
         
-        // Рухаємося до поточної точки
-        if (distance > 0) {
-            float move_x = (dx / distance) * speed;
-            float move_y = (dy / distance) * speed;
-            
-            x += (int)round(move_x);
-            y += (int)round(move_y);
-        }
+        // Рух відбувається через update() з інтерполяцією
     }
     
     // Перевірити чи юніт застряг
@@ -258,8 +313,8 @@ struct Unit {
         }
         
         // Перевіряємо чи змінилася позиція
-        float dx = x - lastPosition.x;
-        float dy = y - lastPosition.y;
+        float dx = (float)x - lastPosition.x;
+        float dy = (float)y - lastPosition.y;
         float distMoved = sqrt(dx * dx + dy * dy);
         
         if (distMoved < 0.5f) {
@@ -308,20 +363,35 @@ struct Unit {
             offsetX = 16;
         }
         
-        x += offsetX;
-        y += offsetY;
+        // COMPATIBILITY: Рухаємо через moveTo для синхронізації
+        moveTo(x + offsetX, y + offsetY);
         
         printf("[UNSTUCK] Unit moved by (%d,%d) to (%d,%d)\n", offsetX, offsetY, x, y);
     }
     
     // Призначити ресурсну точку для збору
-    void assignResource(int resourceX, int resourceY, int buildingX, int buildingY) {
-        assigned_resource_x = resourceX;
-        assigned_resource_y = resourceY;
-        dropoff_building_x = buildingX;
-        dropoff_building_y = buildingY;
-        moveTo(resourceX, resourceY);
-        printf("Unit assigned: resource(%d,%d) building(%d,%d)\n", resourceX, resourceY, buildingX, buildingY);
+    void assignResource(GridCoords resourcePos, GridCoords buildingPos) {
+        // Конвертуємо в screen coords для compatibility з існуючим кодом
+        ScreenCoords resScreen = CoordinateConverter::gridToScreen(resourcePos);
+        ScreenCoords buildScreen = CoordinateConverter::gridToScreen(buildingPos);
+        assigned_resource_x = (int)resScreen.x;
+        assigned_resource_y = (int)resScreen.y;
+        dropoff_building_x = (int)buildScreen.x;
+        dropoff_building_y = (int)buildScreen.y;
+        moveTo(resourcePos);
+        printf("Unit assigned: resource(%d,%d) building(%d,%d)\n", 
+               resourcePos.row, resourcePos.col, buildingPos.row, buildingPos.col);
+    }
+    
+    // COMPATIBILITY: Призначити ресурсну точку (screen coordinates - старий API)
+    void assignResource(int res_x, int res_y, int build_x, int build_y) {
+        assigned_resource_x = res_x;
+        assigned_resource_y = res_y;
+        dropoff_building_x = build_x;
+        dropoff_building_y = build_y;
+        moveTo(res_x, res_y);
+        printf("Unit assigned (screen): resource(%d,%d) building(%d,%d)\n", 
+               res_x, res_y, build_x, build_y);
     }
     
     // Перевірити, чи призначена ресурсна точка
@@ -378,7 +448,8 @@ struct Unit {
     
     // Отримати прямокутник для колізій
     Rectangle getRect() const {
-        return {(float)x - 8, (float)y - 8, 16, 16};
+        ScreenCoords screenPos = getScreenPosition();
+        return {screenPos.x - 16, screenPos.y - 16, 32, 32};
     }
     
     // Отримати колір залежно від фракції
@@ -408,43 +479,76 @@ struct Unit {
     
     // Малювання юніта
     void draw() const {
-        Color unitColor = getColor();
+        ScreenCoords screenPos = getScreenPosition();
         
-        // Малювання юніта як кружечка
-        DrawCircle(x, y, 8, unitColor);
+        // Вибір кольору залежно від фракції
+        Color unitColor;
+        const char* label = nullptr;
         
-        // Рамка
-        DrawCircleLines(x, y, 8, selected ? YELLOW : WHITE);
+        if (unit_type == "legionary") {
+            unitColor = RED;
+            label = "LEG";
+        } else if (unit_type == "phoenician") {
+            unitColor = BLUE;
+            label = "PHO";
+        } else if (unit_type == "slave") {
+            unitColor = YELLOW;
+            label = "SLV";
+        } else {
+            unitColor = GRAY;
+            label = "???";
+        }
+        
+        // Якщо вибраний, зробити яскравішим
+        if (selected) {
+            unitColor.r = (unsigned char)(unitColor.r * 1.3f);
+            unitColor.g = (unsigned char)(unitColor.g * 1.3f);
+            unitColor.b = (unsigned char)(unitColor.b * 1.3f);
+        }
+        
+        // Малювання спрайта або debug shape
+        if (useDebugRendering || !sprite.isLoaded()) {
+            IsometricSprite::drawDebugUnit(screenPos, unitColor, label);
+        } else {
+            sprite.draw(screenPos, WHITE);
+        }
         
         // Індикатор здоров'я
         if (hp < max_hp) {
             float healthPercent = (float)hp / max_hp;
-            DrawRectangle(x - 8, y - 12, 16, 3, RED);
-            DrawRectangle(x - 8, y - 12, (int)(16 * healthPercent), 3, GREEN);
+            DrawRectangle((int)screenPos.x - 16, (int)screenPos.y - 20, 32, 3, RED);
+            DrawRectangle((int)screenPos.x - 16, (int)screenPos.y - 20, (int)(32 * healthPercent), 3, GREEN);
         }
         
         // Індикатор ресурсів для збирачів
         if (can_harvest && (carrying_food > 0 || carrying_gold > 0)) {
-            DrawRectangle(x - 8, y + 10, 16, 3, DARKGRAY);
+            DrawRectangle((int)screenPos.x - 16, (int)screenPos.y + 10, 32, 3, DARKGRAY);
             float carryPercent = (float)(carrying_food + carrying_gold) / max_carry_capacity;
-            DrawRectangle(x - 8, y + 10, (int)(16 * carryPercent), 3, YELLOW);
+            DrawRectangle((int)screenPos.x - 16, (int)screenPos.y + 10, (int)(32 * carryPercent), 3, YELLOW);
         }
         
         // Індикатор збору ресурсів
         if (is_harvesting) {
-            DrawCircleLines(x, y, 12, YELLOW);
+            DrawCircleLines((int)screenPos.x, (int)screenPos.y, 20, YELLOW);
         }
         
         // Якщо рухається, показати ціль
         if (is_moving) {
-            DrawLine(x, y, target_x, target_y, YELLOW);
-            DrawCircleLines(target_x, target_y, 5, YELLOW);
+            ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
+            DrawLine((int)screenPos.x, (int)screenPos.y, (int)targetScreen.x, (int)targetScreen.y, YELLOW);
+            DrawCircleLines((int)targetScreen.x, (int)targetScreen.y, 8, YELLOW);
+        }
+        
+        // Рамка виділення
+        if (selected) {
+            DrawCircleLines((int)screenPos.x, (int)screenPos.y, 18, YELLOW);
         }
     }
     
     // Перевірка кліку
     bool isClicked(Vector2 mousePos) const {
-        return CheckCollisionPointCircle(mousePos, {(float)x, (float)y}, 8);
+        ScreenCoords screenPos = getScreenPosition();
+        return CheckCollisionPointCircle(mousePos, {screenPos.x, screenPos.y}, 16);
     }
     
     // Отримати назву юніта для відображення
