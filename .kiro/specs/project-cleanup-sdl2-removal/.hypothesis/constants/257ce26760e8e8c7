@@ -1,0 +1,4 @@
+# file: F:\GitHub\punic-wars-game\.kiro\specs\project-cleanup-sdl2-removal\src\report_generator.py
+# hypothesis_version: 6.151.9
+
+['## Deleted Files', '## Git Operations', '## Modified Files', 'utf-8', 'w', '✓ PASSED', '✗ FAILED']
