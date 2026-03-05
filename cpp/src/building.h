@@ -185,17 +185,19 @@ struct Building {
     
     // Перевірка чи займає будівля дану grid клітинку
     bool occupiesGridCell(GridCoords cell) const {
-        bool occupies = cell.row >= position.row && 
-               cell.row < position.row + footprint.row &&
-               cell.col >= position.col && 
-               cell.col < position.col + footprint.col;
+        // ВАЖЛИВО: Спрайт будівлі візуально зміщений
+        // Область кліку має бути зміщена на -1 row, -1 col
+        int offsetRow = -1;
+        int offsetCol = -1;
         
-        // Debug: виводимо інформацію про перевірку
-        if (cell.row >= position.row - 5 && cell.row <= position.row + footprint.row + 5 &&
-            cell.col >= position.col - 5 && cell.col <= position.col + footprint.col + 5) {
-            printf("[OCCUPIES] Checking cell (%d, %d) against building at (%d, %d) with footprint (%d, %d): %s\n",
-                   cell.row, cell.col, position.row, position.col, footprint.row, footprint.col,
-                   occupies ? "YES" : "NO");
+        bool occupies = cell.row >= position.row + offsetRow && 
+               cell.row < position.row + offsetRow + footprint.row &&
+               cell.col >= position.col + offsetCol && 
+               cell.col < position.col + offsetCol + footprint.col;
+        
+        if (occupies) {
+            printf("[occupiesGridCell] HIT! Building '%s' at grid(%d,%d) with offset(%d,%d) occupies cell(%d,%d)\n",
+                   name.c_str(), position.row, position.col, offsetRow, offsetCol, cell.row, cell.col);
         }
         
         return occupies;
@@ -204,6 +206,8 @@ struct Building {
     // Отримати прямокутник для колізій з іншими об'єктами
     Rectangle getCollisionRect() const {
         ScreenCoords screenPos = getScreenPosition();
+        // Зміщуємо область колізії вгору на 160 пікселів
+        float offsetY = -160.0f;
         // Використовуємо розміри тайлів з CoordinateConverter
         float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
         float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
@@ -211,7 +215,7 @@ struct Building {
         // Прямокутник що приблизно відповідає ромбу
         return {
             screenPos.x - halfWidth, 
-            screenPos.y - halfHeight, 
+            screenPos.y + offsetY - halfHeight, 
             halfWidth * 2, 
             halfHeight * 2
         };
@@ -221,17 +225,19 @@ struct Building {
     Rectangle getRect() const {
         ScreenCoords screenPos = getScreenPosition();
         
-        // Використовуємо footprint для точної області кліку
-        // Для ізометричної проекції: ширина = footprint.col * 64, висота = footprint.row * 32
-        int widthPixels = footprint.col * 64;
-        int heightPixels = footprint.row * 32;
+        // Зміщуємо область кліку вгору на 160 пікселів
+        float offsetY = -160.0f;
         
-        // Центруємо прямокутник відносно позиції будівлі
+        // Використовуємо константи з CoordinateConverter
+        float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
+        float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
+        
+        // Центруємо прямокутник відносно позиції будівлі з offset
         return {
-            screenPos.x - widthPixels / 2.0f,
-            screenPos.y - heightPixels / 2.0f,
-            (float)widthPixels,
-            (float)heightPixels
+            screenPos.x - halfWidth,
+            screenPos.y + offsetY - halfHeight,
+            halfWidth * 2,
+            halfHeight * 2
         };
     }
     
@@ -287,52 +293,6 @@ struct Building {
                 tint = {brightness, brightness, 150, 255}; // Яскраво-жовтий
             }
             sprite.draw(screenPos, tint);
-            
-            // DEBUG: Візуалізація області кліку (напівпрозорий жовтий ромб)
-            {
-                // Використовуємо розміри тайлів з CoordinateConverter
-                float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
-                float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
-                
-                // Малюємо заповнений ромб
-                Vector2 top = {screenPos.x, screenPos.y - halfHeight};
-                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
-                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
-                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
-                
-                // Малюємо трикутники для заповнення ромба
-                DrawTriangle(top, right, bottom, {255, 255, 0, 50});
-                DrawTriangle(top, bottom, left, {255, 255, 0, 50});
-            }
-            
-            // Додаткова рамка для вибраної будівлі (тільки нижні грані ромба)
-            if (selected) {
-                float pulse = (sin(GetTime() * 3.0f) + 1.0f) / 2.0f;
-                unsigned char alpha = (unsigned char)(150 + pulse * 105); // 150-255
-                
-                // Малюємо тільки нижні дві грані ізометричного ромба
-                float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
-                float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
-                
-                // Точки ромба (право, низ, ліво)
-                Vector2 right = {screenPos.x + halfWidth, screenPos.y};
-                Vector2 bottom = {screenPos.x, screenPos.y + halfHeight};
-                Vector2 left = {screenPos.x - halfWidth, screenPos.y};
-                
-                // Внутрішній ромб (тільки нижні дві лінії)
-                DrawLineEx(right, bottom, 2.0f, {255, 255, 0, alpha});
-                DrawLineEx(bottom, left, 2.0f, {255, 255, 0, alpha});
-                
-                // Зовнішній ромб (тільки нижні дві лінії, трохи більший)
-                float outerHalfWidth = halfWidth + 6.0f;
-                float outerHalfHeight = halfHeight + 3.0f;
-                Vector2 rightOuter = {screenPos.x + outerHalfWidth, screenPos.y};
-                Vector2 bottomOuter = {screenPos.x, screenPos.y + outerHalfHeight};
-                Vector2 leftOuter = {screenPos.x - outerHalfWidth, screenPos.y};
-                
-                DrawLineEx(rightOuter, bottomOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
-                DrawLineEx(bottomOuter, leftOuter, 2.0f, {255, 255, 0, (unsigned char)(alpha / 2)});
-            }
         }
         
         // Прогрес виробництва (поверх спрайту/debug)
@@ -447,9 +407,13 @@ struct Building {
     bool isClicked(Vector2 mousePos) const {
         ScreenCoords screenPos = getScreenPosition();
         
+        // Зміщуємо область кліку вгору на 64 пікселів (1 тайл)
+        // Це відповідає offset -1 row, -1 col в occupiesGridCell
+        float offsetY = -CoordinateConverter::TILE_HEIGHT;  // -64 пікселів
+        
         // Переводимо mouse position в локальні координати відносно центру будівлі
         float localX = mousePos.x - screenPos.x;
-        float localY = mousePos.y - screenPos.y;
+        float localY = mousePos.y - (screenPos.y + offsetY);
         
         // Для ізометричного ромба використовуємо формулу:
         // |localX / halfWidth| + |localY / halfHeight| <= 1
@@ -461,6 +425,13 @@ struct Building {
         // Перевірка чи точка всередині ромба
         float normalized = fabs(localX / halfWidth) + fabs(localY / halfHeight);
         
-        return normalized <= 1.0f;
+        bool result = normalized <= 1.0f;
+        
+        if (result) {
+            printf("[isClicked] HIT! Building '%s' at grid(%d,%d), screen(%.1f,%.1f), mouse(%.1f,%.1f), normalized=%.2f\n",
+                   name.c_str(), position.row, position.col, screenPos.x, screenPos.y, mousePos.x, mousePos.y, normalized);
+        }
+        
+        return result;
     }
 };

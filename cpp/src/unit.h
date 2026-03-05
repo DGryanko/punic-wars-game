@@ -305,7 +305,8 @@ struct Unit {
         // TODO: Update pathfinding to work with GridCoords
         // For now, pathfinding is disabled
         path.clear();
-        printf("[PATHFINDING] Pathfinding temporarily disabled during grid coord migration\n");
+        // NOTE: Pathfinding logs temporarily disabled
+        // printf("[PATHFINDING] Pathfinding temporarily disabled during grid coord migration\n");
     }
     
     // Перевірити чи є шлях

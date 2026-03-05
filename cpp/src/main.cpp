@@ -144,6 +144,10 @@ bool isDragging = false;
 Vector2 dragStart = {0, 0};
 Vector2 dragEnd = {0, 0};
 
+// DEBUG: Останні кліки для візуалізації
+std::vector<Vector2> debugClicks;
+const int MAX_DEBUG_CLICKS = 10;
+
 // Система подвійного кліку
 float lastClickTime = 0.0f;
 int lastClickedUnit = -1;
@@ -463,13 +467,8 @@ int findBuildingAtWorldPos(Vector2 worldPos) {
     
     for (int i = 0; i < buildings.size(); i++) {
         if (buildings[i].faction == playerFaction) {
-            // Отримуємо прямокутник будівлі (враховує текстуру та offset)
-            Rectangle buildingRect = buildings[i].getRect();
-            printf("[FIND_WORLD] Building %d (%s): rect (%.1f, %.1f, %.1f, %.1f)\n",
-                   i, buildings[i].name.c_str(),
-                   buildingRect.x, buildingRect.y, buildingRect.width, buildingRect.height);
-            
-            if (CheckCollisionPointRec(worldPos, buildingRect)) {
+            // Використовуємо isClicked() замість getRect() для точної перевірки ромба
+            if (buildings[i].isClicked(worldPos)) {
                 printf("[FIND_WORLD] Found matching building at index %d\n", i);
                 return i;
             }
@@ -827,9 +826,10 @@ void InitBuildings() {
     
     // Ініціалізація pathfinding з TileMap
     pathfindingManager.init(gameMap);
-    printf("[PATHFINDING] Navigation grid initialized: %dx%d tiles\n", 
-           pathfindingManager.getGrid().getWidth(), 
-           pathfindingManager.getGrid().getHeight());
+    // NOTE: Pathfinding logs temporarily disabled to reduce console spam
+    // printf("[PATHFINDING] Navigation grid initialized: %dx%d tiles\n", 
+    //        pathfindingManager.getGrid().getWidth(), 
+    //        pathfindingManager.getGrid().getHeight());
     
     // Ініціалізація систем розміщення
     if (!buildingPlacer) {
@@ -1432,6 +1432,12 @@ void HandleClicks() {
         // ВАЖЛИВО: Конвертуємо координати миші в світові координати з урахуванням камери
         Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
         
+        // DEBUG: Зберігаємо клік для візуалізації
+        debugClicks.push_back(worldMousePos);
+        if (debugClicks.size() > MAX_DEBUG_CLICKS) {
+            debugClicks.erase(debugClicks.begin());
+        }
+        
         // Початок перетягування для виділення області
         isDragging = true;
         dragStart = worldMousePos;
@@ -1707,9 +1713,11 @@ void DrawGame() {
         if (pathfindingManager.getPath(i, path)) {
             if (!path.empty()) {
                 units[i].setPath(path);
-                printf("[PATHFINDING] Unit %d received path with %d waypoints\n", i, (int)path.size());
+                // NOTE: Pathfinding logs temporarily disabled
+                // printf("[PATHFINDING] Unit %d received path with %d waypoints\n", i, (int)path.size());
             } else {
-                printf("[PATHFINDING] Unit %d received empty path - destination unreachable\n", i);
+                // NOTE: Pathfinding logs temporarily disabled
+                // printf("[PATHFINDING] Unit %d received empty path - destination unreachable\n", i);
             }
         }
         
@@ -1723,8 +1731,9 @@ void DrawGame() {
                 ScreenCoords startScreen = CoordinateConverter::gridToScreen(startGrid);
                 ScreenCoords goalScreen = CoordinateConverter::gridToScreen(goalGrid);
                 pathfindingManager.requestPath(i, {startScreen.x, startScreen.y}, {goalScreen.x, goalScreen.y}, 1.0f);
-                printf("[PATHFINDING] Auto-requesting new path for stuck unit %d from grid(%d,%d) to grid(%d,%d)\n", 
-                       i, startGrid.row, startGrid.col, goalGrid.row, goalGrid.col);
+                // NOTE: Pathfinding logs temporarily disabled
+                // printf("[PATHFINDING] Auto-requesting new path for stuck unit %d from grid(%d,%d) to grid(%d,%d)\n", 
+                //        i, startGrid.row, startGrid.col, goalGrid.row, goalGrid.col);
             }
         }
     }
@@ -1925,6 +1934,13 @@ void DrawGame() {
         };
         DrawRectangleLines((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, YELLOW);
         DrawRectangle((int)selectionRect.x, (int)selectionRect.y, (int)selectionRect.width, (int)selectionRect.height, {255, 255, 0, 50});
+    }
+    
+    // DEBUG: Малюємо останні кліки (в світових координатах)
+    for (size_t i = 0; i < debugClicks.size(); i++) {
+        float alpha = (float)(i + 1) / debugClicks.size(); // Новіші яскравіші
+        DrawCircleV(debugClicks[i], 8.0f, {255, 0, 255, (unsigned char)(alpha * 255)});
+        DrawCircleLines((int)debugClicks[i].x, (int)debugClicks[i].y, 8, {255, 255, 255, (unsigned char)(alpha * 255)});
     }
     
     // Кінець режиму 2D камери
