@@ -866,7 +866,85 @@ void InitBuildings() {
 // Ініціалізація ресурсних точок
 void InitResources() {
     resources.clear();
-    // Ресурси прибрані для тестування будівель
+    
+    // Генеруємо випадкові ресурсні точки на мапі
+    const int NUM_FOOD_SOURCES = 8;  // 8 джерел їжі
+    const int NUM_GOLD_SOURCES = 6;  // 6 джерел золота
+    const int MAX_ATTEMPTS = 100;    // Максимум спроб знайти вільне місце
+    
+    printf("[RESOURCES] Spawning resource points...\n");
+    
+    // Спавн джерел їжі
+    for (int i = 0; i < NUM_FOOD_SOURCES; i++) {
+        bool placed = false;
+        for (int attempt = 0; attempt < MAX_ATTEMPTS && !placed; attempt++) {
+            int row = rand() % gameMap->getHeight();
+            int col = rand() % gameMap->getWidth();
+            
+            // Перевіряємо що тайл прохідний та вільний
+            if (gameMap->isPassable(row, col) && buildingPlacer->isTileFree(row, col)) {
+                // Перевіряємо що немає інших ресурсів поблизу (мінімум 3 тайли)
+                bool tooClose = false;
+                for (const auto& res : resources) {
+                    int dist = abs(res.position.row - row) + abs(res.position.col - col);
+                    if (dist < 3) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    ResourcePoint food;
+                    food.init(FOOD_SOURCE, GridCoords(row, col), 500 + rand() % 500); // 500-1000 їжі
+                    resources.push_back(food);
+                    placed = true;
+                    printf("[RESOURCES] Food source spawned at (%d, %d) with %d amount\n", 
+                           row, col, food.amount);
+                }
+            }
+        }
+        
+        if (!placed) {
+            printf("[RESOURCES] Warning: Could not place food source %d\n", i);
+        }
+    }
+    
+    // Спавн джерел золота
+    for (int i = 0; i < NUM_GOLD_SOURCES; i++) {
+        bool placed = false;
+        for (int attempt = 0; attempt < MAX_ATTEMPTS && !placed; attempt++) {
+            int row = rand() % gameMap->getHeight();
+            int col = rand() % gameMap->getWidth();
+            
+            // Перевіряємо що тайл прохідний та вільний
+            if (gameMap->isPassable(row, col) && buildingPlacer->isTileFree(row, col)) {
+                // Перевіряємо що немає інших ресурсів поблизу (мінімум 3 тайли)
+                bool tooClose = false;
+                for (const auto& res : resources) {
+                    int dist = abs(res.position.row - row) + abs(res.position.col - col);
+                    if (dist < 3) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+                
+                if (!tooClose) {
+                    ResourcePoint gold;
+                    gold.init(GOLD_SOURCE, GridCoords(row, col), 300 + rand() % 400); // 300-700 золота
+                    resources.push_back(gold);
+                    placed = true;
+                    printf("[RESOURCES] Gold source spawned at (%d, %d) with %d amount\n", 
+                           row, col, gold.amount);
+                }
+            }
+        }
+        
+        if (!placed) {
+            printf("[RESOURCES] Warning: Could not place gold source %d\n", i);
+        }
+    }
+    
+    printf("[RESOURCES] Initialization complete: %d resources spawned\n", (int)resources.size());
 }
 
 // Створення юніта поруч з будівлею
