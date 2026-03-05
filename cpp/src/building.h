@@ -186,9 +186,10 @@ struct Building {
     // Перевірка чи займає будівля дану grid клітинку
     bool occupiesGridCell(GridCoords cell) const {
         // ВАЖЛИВО: Спрайт будівлі візуально зміщений
-        // Область кліку має бути зміщена на -1 row, -1 col
-        int offsetRow = -1;
-        int offsetCol = -1;
+        // Треба зміщення -96 пікселів = -1.5 тайла
+        // В ізометричній системі: -1.5 тайла по Y = -2 row, 0 col (приблизно)
+        int offsetRow = -2;
+        int offsetCol = 0;
         
         bool occupies = cell.row >= position.row + offsetRow && 
                cell.row < position.row + offsetRow + footprint.row &&
