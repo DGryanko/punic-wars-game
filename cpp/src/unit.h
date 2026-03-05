@@ -140,7 +140,7 @@ struct Unit {
     }
     
     // Оновлення юніта (рух та AI)
-    void update() {
+    void update(const std::vector<Building>* buildings = nullptr) {
         float currentTime = GetTime();
         float deltaTime = GetFrameTime();
         
@@ -164,6 +164,9 @@ struct Unit {
         // Рух між grid позиціями з постійною швидкістю
         if (is_moving && !is_attacking) {
             if (!(position == target_position)) {
+                // Зберігаємо стару позицію для відкату при колізії
+                ScreenCoords oldScreenPos = current_screen_pos;
+                
                 // Рухаємося з постійною швидкістю в пікселях за секунду
                 ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
                 
@@ -186,6 +189,27 @@ struct Unit {
                         float ratio = moveDistance / distance;
                         current_screen_pos.x += dx * ratio;
                         current_screen_pos.y += dy * ratio;
+                    }
+                    
+                    // Перевірка колізій з будівлями
+                    if (buildings != nullptr) {
+                        Rectangle unitRect = {current_screen_pos.x - 8, current_screen_pos.y - 8, 16, 16};
+                        bool hasCollision = false;
+                        
+                        for (const auto& building : *buildings) {
+                            if (CheckCollisionRecs(unitRect, building.getCollisionRect())) {
+                                hasCollision = true;
+                                break;
+                            }
+                        }
+                        
+                        // Якщо є колізія, відкочуємо позицію
+                        if (hasCollision) {
+                            current_screen_pos = oldScreenPos;
+                            // Зупиняємо рух - юніт застряг
+                            is_moving = false;
+                            printf("[COLLISION] Unit stopped due to building collision\n");
+                        }
                     }
                 } else {
                     // Вже на місці

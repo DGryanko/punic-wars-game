@@ -1747,29 +1747,8 @@ void DrawGame() {
             continue;
         }
         
-        // Зберігаємо стару позицію
-        int old_x = units[i].x;
-        int old_y = units[i].y;
-        
-        // Оновлюємо юніт
-        units[i].update();
-        
-        // Проста перевірка колізій з будівлями (відкат позиції)
-        Rectangle unitRect = {(float)units[i].x - 8, (float)units[i].y - 8, 16, 16};
-        bool hasCollision = false;
-        
-        for (const auto& building : buildings) {
-            if (CheckCollisionRecs(unitRect, building.getCollisionRect())) {
-                hasCollision = true;
-                break;
-            }
-        }
-        
-        // Якщо є колізія з будівлею, повертаємо на стару позицію
-        if (hasCollision) {
-            units[i].x = old_x;
-            units[i].y = old_y;
-        }
+        // Оновлюємо юніт з перевіркою колізій
+        units[i].update(&buildings);
         
         // Бойова логіка - пошук ворогів поблизу
         if (units[i].attack_damage > 0 && !units[i].is_harvesting) {
