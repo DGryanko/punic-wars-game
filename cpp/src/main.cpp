@@ -12,6 +12,7 @@
 #include "ui_button.h"
 #include "tilemap/tilemap_generator.h"
 #include "tilemap/coordinates.h"
+#include "render_queue.h"
 #include <vector>
 #include <cmath>
 #include <ctime>
@@ -417,6 +418,31 @@ void selectUnitsInArea(Rectangle area) {
             }
         }
     }
+}
+
+// Знайти юніт за grid координатами
+int findUnitAtGrid(GridCoords pos) {
+    for (int i = 0; i < units.size(); i++) {
+        if (units[i].faction == playerFaction) {
+            GridCoords unitPos = units[i].getGridPosition();
+            if (unitPos.row == pos.row && unitPos.col == pos.col) {
+                return i;
+            }
+        }
+    }
+    return -1;
+}
+
+// Знайти будівлю за grid координатами
+int findBuildingAtGrid(GridCoords pos) {
+    for (int i = 0; i < buildings.size(); i++) {
+        if (buildings[i].faction == playerFaction) {
+            if (buildings[i].occupiesGridCell(pos)) {
+                return i;
+            }
+        }
+    }
+    return -1;
 }
 
 void selectAllUnitsOfType(const std::string& unitType) {
@@ -1271,7 +1297,12 @@ void HandleClicks() {
             // Скидаємо попередній вибір
             clearAllSelections();
             
-            // Спочатку перевіряємо клік по юнітах (вони менші)
+            // НОВИЙ ПІДХІД: Конвертуємо клік в grid координати
+            ScreenCoords screenPos = {mousePos.x, mousePos.y};
+            GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
+            
+            // Спочатку перевіряємо клік по юнітах (вони менші) - використовуємо screen coords для точності
+            bool foundUnit = false;
             for (int i = 0; i < units.size(); i++) {
                 // Перевіряємо тільки юніти гравця
                 if (units[i].faction == playerFaction && units[i].isClicked(mousePos)) {
@@ -1279,21 +1310,21 @@ void HandleClicks() {
                     selectedUnitIndex = i;
                     lastClickedUnit = i;
                     lastClickTime = currentTime;
-                    return; // Вийти, щоб не перевіряти будівлі
+                    foundUnit = true;
+                    break;
                 }
             }
             
-            // Потім перевіряємо клік по будівлях
-            for (int i = 0; i < buildings.size(); i++) {
-                // Перевіряємо тільки будівлі гравця
-                if (buildings[i].faction == playerFaction && buildings[i].isClicked(mousePos)) {
-                    buildings[i].selected = true;
-                    selectedBuildingIndex = i;
+            // Якщо не знайшли юніт, перевіряємо будівлі за grid координатами
+            if (!foundUnit) {
+                int buildingIndex = findBuildingAtGrid(gridPos);
+                if (buildingIndex >= 0) {
+                    buildings[buildingIndex].selected = true;
+                    selectedBuildingIndex = buildingIndex;
                     // Оновлюємо панель замовлення
                     if (unitOrderPanel) {
-                        unitOrderPanel->setSelectedBuilding(i);
+                        unitOrderPanel->setSelectedBuilding(buildingIndex);
                     }
-                    return;
                 }
             }
         }
@@ -1335,6 +1366,10 @@ void HandleClicks() {
         }
         
         if (hasSelectedUnits) {
+            // Конвертуємо клік в grid координати для руху
+            ScreenCoords screenPos = {mousePos.x, mousePos.y};
+            GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
+            
             // Перевіряємо клік по ворожих юнітах для атаки
             bool foundEnemy = false;
             for (int i = 0; i < units.size(); i++) {
@@ -1342,7 +1377,8 @@ void HandleClicks() {
                     // Відправляємо бойових юнітів атакувати
                     for (auto& unit : units) {
                         if (unit.selected && unit.faction == playerFaction && unit.attack_damage > 0) {
-                            unit.moveTo(units[i].x, units[i].y);
+                            // Рухаємося до grid позиції ворога
+                            unit.moveTo(units[i].getGridPosition());
                             unit.target_unit_id = i;
                         }
                     }
@@ -1357,31 +1393,34 @@ void HandleClicks() {
                 for (int i = 0; i < resources.size(); i++) {
                     if (!resources[i].depleted && resources[i].isClicked(mousePos)) {
                         // Знаходимо найближчий КВЕСТОРІУМ для здачі ресурсів
-                        int nearestBuildingX = -1;
-                        int nearestBuildingY = -1;
+                        GridCoords nearestBuildingPos = {-1, -1};
                         float minDist = 999999.0f;
                         
                         for (const auto& building : buildings) {
                             if (building.faction == playerFaction && building.type == QUESTORIUM_ROME) {
-                                float dist = sqrt(pow(resources[i].x - building.x, 2) + pow(resources[i].y - building.y, 2));
+                                GridCoords buildingPos = building.getGridPosition();
+                                GridCoords resourcePos = resources[i].getGridPosition();
+                                float dist = sqrt(pow(buildingPos.row - resourcePos.row, 2) + 
+                                                pow(buildingPos.col - resourcePos.col, 2));
                                 if (dist < minDist) {
                                     minDist = dist;
-                                    nearestBuildingX = building.x + 40;
-                                    nearestBuildingY = building.y + 30;
+                                    nearestBuildingPos = buildingPos;
                                 }
                             }
                         }
                         
                         // Якщо не знайшли квесторіум, шукаємо HQ
-                        if (nearestBuildingX == -1) {
+                        if (nearestBuildingPos.row == -1) {
                             for (const auto& building : buildings) {
                                 if (building.faction == playerFaction && 
                                     (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
-                                    float dist = sqrt(pow(resources[i].x - building.x, 2) + pow(resources[i].y - building.y, 2));
+                                    GridCoords buildingPos = building.getGridPosition();
+                                    GridCoords resourcePos = resources[i].getGridPosition();
+                                    float dist = sqrt(pow(buildingPos.row - resourcePos.row, 2) + 
+                                                    pow(buildingPos.col - resourcePos.col, 2));
                                     if (dist < minDist) {
                                         minDist = dist;
-                                        nearestBuildingX = building.x + 40;
-                                        nearestBuildingY = building.y + 30;
+                                        nearestBuildingPos = buildingPos;
                                     }
                                 }
                             }
@@ -1390,11 +1429,11 @@ void HandleClicks() {
                         // Відправляємо збирачів до ресурсу з призначенням
                         for (auto& unit : units) {
                             if (unit.selected && unit.faction == playerFaction && unit.can_harvest) {
-                                if (nearestBuildingX != -1) {
-                                    unit.assignResource(resources[i].x + 20, resources[i].y + 20, 
-                                                      nearestBuildingX, nearestBuildingY);
-                                    printf("Slave assigned to resource at (%d, %d), dropoff at (%d, %d)\n", 
-                                           resources[i].x + 20, resources[i].y + 20, nearestBuildingX, nearestBuildingY);
+                                if (nearestBuildingPos.row != -1) {
+                                    unit.assignResource(resources[i].getGridPosition(), nearestBuildingPos);
+                                    printf("Slave assigned to resource at grid(%d, %d), dropoff at grid(%d, %d)\n", 
+                                           resources[i].getGridPosition().row, resources[i].getGridPosition().col,
+                                           nearestBuildingPos.row, nearestBuildingPos.col);
                                 }
                             }
                         }
@@ -1403,25 +1442,22 @@ void HandleClicks() {
                     }
                 }
                 
-                // Якщо не клікнули по ресурсу або ворогу, звичайний рух
+                // Якщо не клікнули по ресурсу або ворогу, звичайний рух до grid позиції
                 if (!foundResource) {
-                    // Використовуємо pathfinding для руху
+                    // Рухаємо юніти до grid координат
                     for (int i = 0; i < units.size(); i++) {
                         if (units[i].selected && units[i].faction == playerFaction) {
-                            // Запитуємо шлях через pathfinding manager
-                            Vector2 start = {(float)units[i].x, (float)units[i].y};
-                            Vector2 goal = {mousePos.x, mousePos.y};
-                            pathfindingManager.requestPath(i, start, goal, 1.0f);
-                            
+                            // Використовуємо grid координати для руху
+                            units[i].moveTo(gridPos);
                             units[i].target_unit_id = -1; // Скидаємо ціль атаки
+                            
                             // Скидаємо призначений ресурс при ручному русі
                             if (units[i].can_harvest) {
                                 units[i].assigned_resource_x = -1;
                                 units[i].assigned_resource_y = -1;
                             }
                             
-                            printf("[PATHFINDING] Requested path for unit %d from (%d,%d) to (%.0f,%.0f)\n", 
-                                   i, units[i].x, units[i].y, mousePos.x, mousePos.y);
+                            printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
                         }
                     }
                 }
@@ -1692,18 +1728,25 @@ void DrawGame() {
         }
     }
     
-    // Малювання всіх будівель
-    BuildingRenderer::drawAllBuildings(buildings);
+    // НОВИЙ ПІДХІД: Використовуємо RenderQueue для правильного depth sorting
+    RenderQueue renderQueue;
     
-    // Малювання всіх ресурсних точок
-    for (const auto& resource : resources) {
-        resource.draw();
+    // Додаємо всі об'єкти до черги
+    for (int i = 0; i < units.size(); i++) {
+        renderQueue.addUnit(i, units[i].getGridPosition());
     }
     
-    // Малювання всіх юнітів
-    for (const auto& unit : units) {
-        unit.draw();
+    for (int i = 0; i < buildings.size(); i++) {
+        renderQueue.addBuilding(i, buildings[i].getGridPosition(), buildings[i].footprint);
     }
+    
+    for (int i = 0; i < resources.size(); i++) {
+        renderQueue.addResource(i, resources[i].getGridPosition());
+    }
+    
+    // Сортуємо та рендеримо в правильному порядку (back-to-front)
+    renderQueue.sort();
+    renderQueue.render(units, buildings, resources);
     
     // Кінець режиму 2D камери
     EndMode2D();

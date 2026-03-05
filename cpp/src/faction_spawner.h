@@ -119,7 +119,7 @@ private:
     void createHQ(Faction faction, const GridCoords& position) {
         Building hq;
         BuildingType type = (faction == ROME) ? HQ_ROME : HQ_CARTHAGE;
-        hq.init(type, faction, 0, 0);
+        hq.init(type, faction, position);
         
         int buildingIndex = buildings->size();
         if (placer->placeBuilding(hq, position.row, position.col, buildingIndex)) {

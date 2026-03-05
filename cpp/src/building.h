@@ -1,5 +1,7 @@
 #pragma once
 #include "raylib.h"
+#include "tilemap/coordinates.h"
+#include "isometric_sprite.h"
 #include <string>
 #include <vector>
 
@@ -24,12 +26,23 @@ enum BuildingType {
 
 // Структура будівлі
 struct Building {
-    int x, y;                    // Координати
-    int tile_row, tile_col;      // Тайлові координати
+    // НОВИЙ ПІДХІД: Grid coordinates (ізометрична система)
+    GridCoords position;         // Поточні координати в сітці
+    GridCoords footprint;        // Розмір будівлі в тайлах (rows, cols)
+    
+    // COMPATIBILITY LAYER: Публічні змінні для старого коду
+    // Ці змінні автоматично синхронізуються з grid координатами
+    int x, y;                    // Screen coordinates (deprecated, але працюють)
+    int tile_row, tile_col;      // Тайлові координати (deprecated)
+    
     BuildingType type;           // Тип будівлі
     Faction faction;             // Фракція
     bool selected = false;       // Чи вибрана будівля
     std::string name;            // Назва для відображення
+    
+    // Isometric sprite system
+    IsometricSprite sprite;      // Спрайт будівлі
+    bool useDebugRendering;      // Чи використовувати debug режим
     
     // Система виробництва
     bool is_producing = false;   // Чи виробляє юніт
@@ -47,13 +60,72 @@ struct Building {
     float texture_scale = 1.0f;     // Масштаб текстури
     
     // Ініціалізація будівлі
-    void init(BuildingType buildingType, Faction buildingFaction, int posX, int posY) {
+    void init(BuildingType buildingType, Faction buildingFaction, GridCoords startPos) {
         type = buildingType;
         faction = buildingFaction;
-        x = posX;
-        y = posY;
-        tile_row = 0;
-        tile_col = 0;
+        position = startPos;
+        useDebugRendering = true; // За замовчуванням використовуємо debug
+        
+        // Встановлення footprint залежно від типу
+        switch (type) {
+            case HQ_ROME:
+            case HQ_CARTHAGE:
+                footprint = {3, 3}; // 3x3 тайли
+                break;
+            case BARRACKS_ROME:
+            case BARRACKS_CARTHAGE:
+            case QUESTORIUM_ROME:
+            case LIBTENT_1:
+            case LIBTENT_2:
+            case LIBTENT_3:
+            case TENTORIUM:
+                footprint = {2, 2}; // 2x2 тайли
+                break;
+            default:
+                footprint = {1, 1}; // 1x1 тайл
+                break;
+        }
+        
+        // COMPATIBILITY: Синхронізуємо screen coordinates
+        syncScreenCoords();
+        
+        // Спроба завантажити спрайт
+        std::string spritePath = "assets/sprites/isometric/buildings/";
+        switch (type) {
+            case HQ_ROME:
+                spritePath += "hq_rome.png";
+                break;
+            case HQ_CARTHAGE:
+                spritePath += "hq_carthage.png";
+                break;
+            case BARRACKS_ROME:
+                spritePath += "barracks_rome.png";
+                break;
+            case BARRACKS_CARTHAGE:
+                spritePath += "barracks_carthage.png";
+                break;
+            case QUESTORIUM_ROME:
+                spritePath += "questorium_rome.png";
+                break;
+            case LIBTENT_1:
+                spritePath += "libtent_1.png";
+                break;
+            case LIBTENT_2:
+                spritePath += "libtent_2.png";
+                break;
+            case LIBTENT_3:
+                spritePath += "libtent_3.png";
+                break;
+            case TENTORIUM:
+                spritePath += "tentorium.png";
+                break;
+        }
+        
+        if (sprite.loadFromFile(spritePath.c_str())) {
+            useDebugRendering = false;
+        } else {
+            TraceLog(LOG_INFO, "[BUILDING] Using debug rendering for type %d", type);
+        }
         
         // Встановлення назви залежно від типу
         switch (type) {
@@ -107,30 +179,63 @@ struct Building {
         use_texture = true;
     }
     
+    // COMPATIBILITY: Синхронізація screen coordinates з grid coordinates
+    void syncScreenCoords() {
+        ScreenCoords screen = CoordinateConverter::gridToScreen(position);
+        x = (int)screen.x;
+        y = (int)screen.y;
+        tile_row = position.row;
+        tile_col = position.col;
+    }
+    
+    // Отримати screen позицію (для рендерингу)
+    ScreenCoords getScreenPosition() const {
+        return CoordinateConverter::gridToScreen(position);
+    }
+    
+    // Отримати grid позицію
+    GridCoords getGridPosition() const {
+        return position;
+    }
+    
+    // Перевірка чи займає будівля дану grid клітинку
+    bool occupiesGridCell(GridCoords cell) const {
+        return cell.row >= position.row && 
+               cell.row < position.row + footprint.row &&
+               cell.col >= position.col && 
+               cell.col < position.col + footprint.col;
+    }
+    
     // Отримати прямокутник для колізій з іншими об'єктами (маленький)
     Rectangle getCollisionRect() const {
-        return {(float)x, (float)y, 80, 60};
+        ScreenCoords screenPos = getScreenPosition();
+        return {screenPos.x - 40, screenPos.y - 30, 80, 60};
     }
     
     // Отримати прямокутник для кліків (враховує текстуру)
     Rectangle getRect() const {
+        ScreenCoords screenPos = getScreenPosition();
         if (use_texture) {
             // Використовуємо розмір текстури для кліків
             return {
-                (float)x + texture_offset.x,
-                (float)y + texture_offset.y,
+                screenPos.x + texture_offset.x,
+                screenPos.y + texture_offset.y,
                 384 * texture_scale,  // Ширина текстури
                 224 * texture_scale   // Висота текстури
             };
         }
-        return {(float)x, (float)y, 80, 60};
+        // Debug режим - використовуємо footprint
+        int widthPixels = footprint.col * 64;
+        int heightPixels = footprint.row * 32;
+        return {screenPos.x - widthPixels/2, screenPos.y - heightPixels/2, (float)widthPixels, (float)heightPixels};
     }
     
     // Отримати прямокутник для текстури
     Rectangle getTextureRect() const {
+        ScreenCoords screenPos = getScreenPosition();
         return {
-            (float)x + texture_offset.x,
-            (float)y + texture_offset.y,
+            screenPos.x + texture_offset.x,
+            screenPos.y + texture_offset.y,
             80 * texture_scale,
             60 * texture_scale
         };
@@ -150,29 +255,41 @@ struct Building {
     
     // Малювання будівлі
     void draw() const {
-        Color buildingColor = getColor();
+        ScreenCoords screenPos = getScreenPosition();
         
-        // Якщо вибрана, зробити яскравішою
-        if (selected) {
-            buildingColor.r = (unsigned char)(buildingColor.r * 1.3f);
-            buildingColor.g = (unsigned char)(buildingColor.g * 1.3f);
-            buildingColor.b = (unsigned char)(buildingColor.b * 1.3f);
+        if (useDebugRendering) {
+            // Debug режим - ізометричний прямокутник
+            Color buildingColor = getColor();
+            
+            // Якщо вибрана, зробити яскравішою
+            if (selected) {
+                buildingColor.r = (unsigned char)(buildingColor.r * 1.3f);
+                buildingColor.g = (unsigned char)(buildingColor.g * 1.3f);
+                buildingColor.b = (unsigned char)(buildingColor.b * 1.3f);
+            }
+            
+            // Малюємо debug прямокутник з урахуванням footprint
+            int widthPixels = footprint.col * 64;  // 64 пікселі на тайл по ширині
+            int heightPixels = footprint.row * 32; // 32 пікселі на тайл по висоті
+            sprite.drawDebugBuilding(screenPos, widthPixels, heightPixels, buildingColor, name.c_str());
+        } else {
+            // Рендеринг спрайту
+            Color tint = WHITE;
+            if (selected) {
+                tint = {255, 255, 200, 255}; // Жовтуватий відтінок для вибраної
+            }
+            sprite.draw(screenPos, tint);
         }
         
-        // Малювання будівлі
-        DrawRectangle(x, y, 80, 60, buildingColor);
-        
-        // Рамка
-        DrawRectangleLines(x, y, 80, 60, selected ? YELLOW : WHITE);
-        
-        // Назва будівлі
-        DrawText(name.c_str(), x + 5, y + 25, 10, WHITE);
-        
-        // Прогрес виробництва
+        // Прогрес виробництва (поверх спрайту/debug)
         if (is_producing) {
             float progress = production_progress / production_time;
-            DrawRectangle(x, y + 65, (int)(80 * progress), 5, GREEN);
-            DrawRectangleLines(x, y + 65, 80, 5, WHITE);
+            int barWidth = 80;
+            int barX = (int)screenPos.x - barWidth / 2;
+            int barY = (int)screenPos.y + 10; // Трохи нижче центру
+            
+            DrawRectangle(barX, barY, (int)(barWidth * progress), 5, GREEN);
+            DrawRectangleLines(barX, barY, barWidth, 5, WHITE);
         }
     }
     
