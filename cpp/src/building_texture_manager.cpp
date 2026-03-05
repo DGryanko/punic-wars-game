@@ -22,23 +22,23 @@ BuildingTextureManager& BuildingTextureManager::getInstance() {
 const char* BuildingTextureManager::getTexturePath(BuildingType type) const {
     switch (type) {
         case HQ_ROME:
-            return "assets/sprites/Praetorium.png";
+            return "assets/sprites/isometric/buildings/Praetorium.png";
         case HQ_CARTHAGE:
-            return "assets/sprites/MainTent.png";
+            return "assets/sprites/isometric/buildings/Skene.png";  // Головна палатка Карфагену
         case BARRACKS_ROME:
-            return "assets/sprites/Contubernium.png";
+            return "assets/sprites/isometric/buildings/Contubernium.png";
         case BARRACKS_CARTHAGE:
-            return "assets/sprites/MercenaryCamp.png";
+            return "assets/sprites/isometric/buildings/LibTent1.png";  // Казарми Карфагену
         case QUESTORIUM_ROME:
-            return "assets/sprites/Questorium.png";
+            return "assets/sprites/isometric/buildings/Questorium.png";
         case LIBTENT_1:
-            return "assets/sprites/LibTent1.png";
+            return "assets/sprites/isometric/buildings/LibTent1.png";
         case LIBTENT_2:
-            return "assets/sprites/LibTent2.png";
+            return "assets/sprites/isometric/buildings/LibTent2.png";
         case LIBTENT_3:
-            return "assets/sprites/LibTent3.png";
+            return "assets/sprites/isometric/buildings/LibTent3.png";
         case TENTORIUM:
-            return "assets/sprites/Tentorium.png";
+            return "assets/sprites/isometric/buildings/Tentorium.png";
         default:
             return nullptr;
     }

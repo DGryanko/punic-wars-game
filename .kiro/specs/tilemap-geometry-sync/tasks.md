@@ -1,0 +1,151 @@
+# Implementation Plan
+
+- [x] 1. Write bug condition exploration test
+  - **Property 1: Fault Condition** - NavigationGrid Uses Rectangular Grid Instead of Isometric Tiles
+  - **CRITICAL**: This test MUST FAIL on unfixed code - failure confirms the bug exists
+  - **DO NOT attempt to fix the test or the code when it fails**
+  - **NOTE**: This test encodes the expected behavior - it will validate the fix when it passes after implementation
+  - **GOAL**: Surface counterexamples that demonstrate NavigationGrid uses rectangular pixel math instead of isometric tile geometry
+  - **Scoped PBT Approach**: Test concrete cases where NavigationGrid operations produce different results than CoordinateConverter/TileMap
+  - Test coordinate conversion mismatch: NavigationGrid.worldToGrid(screenX, screenY) != CoordinateConverter.screenToGrid(ScreenCoords(screenX, screenY))
+  - Test grid-to-world mismatch: NavigationGrid.gridToWorld(gridX, gridY) != CoordinateConverter.gridToScreen(GridCoords(row, col))
+  - Test grid size mismatch: NavigationGrid dimensions (80x60 with cellSize=16) != TileMap dimensions (e.g., 20x15 tiles)
+  - Test passability mismatch: NavigationGrid.isWalkable() may differ from TileMap.isPassable() due to updateFromBuildings() using rectangular conversion
+  - Run test on UNFIXED code
+  - **EXPECTED OUTCOME**: Test FAILS (this is correct - it proves the bug exists)
+  - Document counterexamples found: specific coordinates where NavigationGrid produces incorrect results
+  - Mark task complete when test is written, run, and failure is documented
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [ ] 2. Write preservation property tests (BEFORE implementing fix)
+  - **Property 2: Preservation** - A* Pathfinding Logic Unchanged
+  - **IMPORTANT**: Follow observation-first methodology
+  - Observe behavior on UNFIXED code for A* pathfinding operations (not coordinate conversion)
+  - Test A* algorithm: Verify pathfinding finds valid paths with 8-direction movement and Manhattan distance heuristic
+  - Test path caching: Verify PathfindingManager caches paths and invalidates cache on obstacle changes
+  - Test request queue: Verify PathfindingManager processes requests with maxCalculationsPerFrame limit
+  - Test neighbor generation: Verify getNeighbors() returns 8 directions and checks passability
+  - Test HandleClicks integration: Verify movement commands use GridCoords for target position
+  - Write property-based tests capturing observed behavior patterns from Preservation Requirements
+  - Property-based testing generates many test cases for stronger guarantees
+  - Run tests on UNFIXED code
+  - **EXPECTED OUTCOME**: Tests PASS (this confirms baseline behavior to preserve)
+  - Mark task complete when tests are written, run, and passing on unfixed code
+  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [x] 3. Fix NavigationGrid to use isometric tile geometry
+
+  - [x] 3.1 Remove cellSize and pixel-based math from NavigationGrid
+    - Remove `int cellSize` member variable from NavigationGrid class
+    - Remove `cellSizePixels` parameter from init() method
+    - Remove all division/multiplication operations using cellSize
+    - Remove getCellSize() getter method (no longer needed)
+    - _Bug_Condition: isBugCondition(operation) where operation uses cellSize and rectangular math_
+    - _Expected_Behavior: NavigationGrid operates in tile coordinates without pixel-based cellSize_
+    - _Preservation: A* algorithm, caching, and queue processing remain unchanged_
+    - _Requirements: 1.1, 2.1_
+
+  - [x] 3.2 Replace worldToGrid() with isometric coordinate conversion
+    - Change signature to: `GridCoords worldToGrid(const ScreenCoords& screen) const`
+    - Implement using `CoordinateConverter::screenToGrid(screen)`
+    - Remove bounds checking (CoordinateConverter returns valid GridCoords)
+    - Remove rectangular division by cellSize
+    - _Bug_Condition: isBugCondition(operation) where operation.type == 'worldToGrid'_
+    - _Expected_Behavior: worldToGrid uses CoordinateConverter for isometric conversion_
+    - _Preservation: Callers of worldToGrid continue to work with new GridCoords return type_
+    - _Requirements: 1.3, 2.3_
+
+  - [x] 3.3 Replace gridToWorld() with isometric coordinate conversion
+    - Change signature to: `ScreenCoords gridToWorld(const GridCoords& grid) const`
+    - Implement using `CoordinateConverter::gridToScreen(grid)`
+    - Remove bounds checking and cell center calculation
+    - Remove rectangular multiplication by cellSize
+    - _Bug_Condition: isBugCondition(operation) where operation.type == 'gridToWorld'_
+    - _Expected_Behavior: gridToWorld uses CoordinateConverter for isometric conversion_
+    - _Preservation: Callers of gridToWorld continue to work with new ScreenCoords return type_
+    - _Requirements: 1.3, 2.3, 2.4_
+
+  - [x] 3.4 Replace cells[] array with TileMap reference for passability
+    - Add `const TileMap* tileMap` member variable to NavigationGrid
+    - Change init() to accept `const TileMap* map` parameter
+    - Remove `std::vector<bool> cells` member variable
+    - Change isWalkable(gridX, gridY) to call `tileMap->isPassable(row, col)`
+    - Update constructor to initialize tileMap pointer
+    - _Bug_Condition: isBugCondition(operation) where operation checks passability using cells[]_
+    - _Expected_Behavior: isWalkable delegates to TileMap.isPassable() for tile passability_
+    - _Preservation: Passability checking logic continues to work, just delegated to TileMap_
+    - _Requirements: 1.1, 2.6_
+
+  - [x] 3.5 Refactor updateFromBuildings() to use GridCoords
+    - Change logic to work with Building.gridPos (GridCoords) instead of Building.getRect()
+    - Remove Rectangle-to-grid conversion using worldToGrid()
+    - Mark tiles as obstacles using GridCoords directly
+    - Update to work with TileMap passability instead of cells[] array
+    - _Bug_Condition: isBugCondition(operation) where operation.type == 'updateFromBuildings'_
+    - _Expected_Behavior: updateFromBuildings uses GridCoords to mark obstacle tiles_
+    - _Preservation: Building obstacles continue to block pathfinding_
+    - _Requirements: 1.5, 2.5_
+
+  - [x] 3.6 Update getNeighbors() to use TileMap bounds
+    - Change bounds checking to use `tileMap->isValidCoord(row, col)`
+    - Use `tileMap->getWidth()` and `tileMap->getHeight()` for boundary checks
+    - Keep 8-direction neighbor generation logic unchanged
+    - Keep passability checking for neighbors (now using TileMap)
+    - _Bug_Condition: isBugCondition(operation) where operation checks grid bounds_
+    - _Expected_Behavior: getNeighbors uses TileMap dimensions for bounds checking_
+    - _Preservation: 8-direction movement and neighbor passability checking unchanged_
+    - _Requirements: 2.1, 3.4_
+
+  - [x] 3.7 Update getter methods to use TileMap dimensions
+    - Change getWidth() to return `tileMap->getWidth()`
+    - Change getHeight() to return `tileMap->getHeight()`
+    - Remove getCellSize() method (no longer applicable)
+    - _Bug_Condition: isBugCondition(operation) where operation queries grid dimensions_
+    - _Expected_Behavior: Grid dimensions match TileMap tile dimensions_
+    - _Preservation: Code querying grid dimensions continues to work_
+    - _Requirements: 2.1, 2.2_
+
+  - [x] 3.8 Update PathfindingManager and callers to use new coordinate types
+    - Update PathfindingManager to work with GridCoords and ScreenCoords
+    - Update HandleClicks to pass GridCoords to pathfinding (should already use GridCoords)
+    - Update unit movement to use ScreenCoords from gridToWorld()
+    - Verify all callers of NavigationGrid methods use correct coordinate types
+    - _Bug_Condition: Integration points between NavigationGrid and other systems_
+    - _Expected_Behavior: All systems use consistent GridCoords/ScreenCoords types_
+    - _Preservation: Pathfinding requests and movement commands continue to work_
+    - _Requirements: 2.3, 2.4, 3.3_
+
+  - [x] 3.9 Verify bug condition exploration test now passes
+    - **Property 1: Expected Behavior** - NavigationGrid Uses Isometric Tile Geometry
+    - **IMPORTANT**: Re-run the SAME test from task 1 - do NOT write a new test
+    - The test from task 1 encodes the expected behavior
+    - When this test passes, it confirms the expected behavior is satisfied
+    - Run bug condition exploration test from step 1
+    - Verify NavigationGrid.worldToGrid() matches CoordinateConverter.screenToGrid()
+    - Verify NavigationGrid.gridToWorld() matches CoordinateConverter.gridToScreen()
+    - Verify NavigationGrid dimensions match TileMap dimensions
+    - Verify NavigationGrid.isWalkable() matches TileMap.isPassable()
+    - **EXPECTED OUTCOME**: Test PASSES (confirms bug is fixed)
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6_
+
+  - [x] 3.10 Verify preservation tests still pass
+    - **Property 2: Preservation** - A* Pathfinding Logic Unchanged
+    - **IMPORTANT**: Re-run the SAME tests from task 2 - do NOT write new tests
+    - Run preservation property tests from step 2
+    - Verify A* algorithm still finds valid paths with 8-direction movement
+    - Verify path caching and invalidation still works
+    - Verify request queue processing with maxCalculationsPerFrame still works
+    - Verify getNeighbors() still returns 8 directions with passability checks
+    - Verify HandleClicks integration still works with GridCoords
+    - **EXPECTED OUTCOME**: Tests PASS (confirms no regressions)
+    - Confirm all tests still pass after fix (no regressions)
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [x] 4. Checkpoint - Ensure all tests pass
+  - Run all exploration tests - should PASS (bug is fixed)
+  - Run all preservation tests - should PASS (no regressions)
+  - Run integration tests with full game flow
+  - Verify units move along isometric tile centers
+  - Verify mouse clicks correctly convert to pathfinding targets
+  - Verify buildings correctly block pathfinding
+  - Ensure all tests pass, ask the user if questions arise

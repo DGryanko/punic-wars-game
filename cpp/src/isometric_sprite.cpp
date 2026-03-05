@@ -7,6 +7,42 @@ IsometricSprite::IsometricSprite() {
     width = 0;
     height = 0;
     anchorPoint = {0, 0};
+    filepath = "";
+}
+
+// Copy constructor - перезавантажуємо текстуру з того самого файлу
+IsometricSprite::IsometricSprite(const IsometricSprite& other) {
+    loaded = false;
+    texture.id = 0;
+    width = other.width;
+    height = other.height;
+    anchorPoint = other.anchorPoint;
+    filepath = other.filepath;
+    
+    // Якщо оригінал мав завантажену текстуру, завантажуємо її знову
+    if (!filepath.empty() && other.loaded) {
+        loadFromFile(filepath.c_str());
+    }
+}
+
+// Assignment operator - перезавантажуємо текстуру
+IsometricSprite& IsometricSprite::operator=(const IsometricSprite& other) {
+    if (this != &other) {
+        // Вивантажуємо стару текстуру
+        unload();
+        
+        // Копіюємо параметри
+        width = other.width;
+        height = other.height;
+        anchorPoint = other.anchorPoint;
+        filepath = other.filepath;
+        
+        // Якщо оригінал мав завантажену текстуру, завантажуємо її знову
+        if (!filepath.empty() && other.loaded) {
+            loadFromFile(filepath.c_str());
+        }
+    }
+    return *this;
 }
 
 IsometricSprite::~IsometricSprite() {
@@ -14,6 +50,9 @@ IsometricSprite::~IsometricSprite() {
 }
 
 bool IsometricSprite::loadFromFile(const char* filepath) {
+    // Зберігаємо шлях для можливого перезавантаження
+    this->filepath = filepath;
+    
     if (FileExists(filepath)) {
         texture = LoadTexture(filepath);
         if (texture.id > 0) {

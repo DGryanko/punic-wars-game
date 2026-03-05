@@ -755,9 +755,9 @@ void ProcessResourceHarvesting() {
 void InitBuildings() {
     buildings.clear();
     
-    // Ініціалізація pathfinding
-    pathfindingManager.init(1434, 1075);
-    printf("[PATHFINDING] Navigation grid initialized: %dx%d cells\n", 
+    // Ініціалізація pathfinding з TileMap
+    pathfindingManager.init(gameMap);
+    printf("[PATHFINDING] Navigation grid initialized: %dx%d tiles\n", 
            pathfindingManager.getGrid().getWidth(), 
            pathfindingManager.getGrid().getHeight());
     
@@ -807,20 +807,23 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     int spawnX = building.x + 90;
     int spawnY = building.y + 30;
     
-    // Шукаємо найближчу вільну клітинку
-    int gridX, gridY;
-    pathfindingManager.getGrid().worldToGrid(spawnX, spawnY, gridX, gridY);
+    // Конвертуємо в grid координати
+    GridCoords spawnGrid = pathfindingManager.getGrid().worldToGrid(ScreenCoords(spawnX, spawnY));
+    int gridRow = spawnGrid.row;
+    int gridCol = spawnGrid.col;
     
     bool foundFree = false;
     // Шукаємо в радіусі до 5 клітинок
     for (int radius = 0; radius <= 5 && !foundFree; radius++) {
         for (int dy = -radius; dy <= radius && !foundFree; dy++) {
             for (int dx = -radius; dx <= radius && !foundFree; dx++) {
-                int nx = gridX + dx;
-                int ny = gridY + dy;
-                if (pathfindingManager.getGrid().isWalkable(nx, ny)) {
+                int nrow = gridRow + dy;
+                int ncol = gridCol + dx;
+                if (pathfindingManager.getGrid().isWalkable(nrow, ncol)) {
                     // Конвертуємо назад в світові координати
-                    pathfindingManager.getGrid().gridToWorld(nx, ny, spawnX, spawnY);
+                    ScreenCoords freeScreen = pathfindingManager.getGrid().gridToWorld(GridCoords(nrow, ncol));
+                    spawnX = (int)freeScreen.x;
+                    spawnY = (int)freeScreen.y;
                     foundFree = true;
                 }
             }
@@ -1532,11 +1535,14 @@ void DrawGame() {
         if (units[i].is_moving && !units[i].hasPath() && units[i].usePathfinding) {
             // Автоматично запитуємо новий шлях до останньої цілі
             if (units[i].target_x != units[i].x || units[i].target_y != units[i].y) {
-                Vector2 start = {(float)units[i].x, (float)units[i].y};
-                Vector2 goal = {(float)units[i].target_x, (float)units[i].target_y};
-                pathfindingManager.requestPath(i, start, goal, 1.0f);
-                printf("[PATHFINDING] Auto-requesting new path for stuck unit %d from (%d,%d) to (%d,%d)\n", 
-                       i, units[i].x, units[i].y, units[i].target_x, units[i].target_y);
+                // Використовуємо GridCoords для pathfinding (виправлення Bug Condition 3)
+                GridCoords startGrid = units[i].getGridPosition();
+                GridCoords goalGrid = units[i].target_position;
+                ScreenCoords startScreen = CoordinateConverter::gridToScreen(startGrid);
+                ScreenCoords goalScreen = CoordinateConverter::gridToScreen(goalGrid);
+                pathfindingManager.requestPath(i, {startScreen.x, startScreen.y}, {goalScreen.x, goalScreen.y}, 1.0f);
+                printf("[PATHFINDING] Auto-requesting new path for stuck unit %d from grid(%d,%d) to grid(%d,%d)\n", 
+                       i, startGrid.row, startGrid.col, goalGrid.row, goalGrid.col);
             }
         }
     }

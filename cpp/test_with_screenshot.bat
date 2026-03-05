@@ -6,7 +6,6 @@ REM Перевірка чи існує exe
 if not exist "punic_wars.exe" (
     echo Error: punic_wars.exe not found!
     echo Run compile.bat first
-    pause
     exit /b 1
 )
 
@@ -24,8 +23,6 @@ echo Game is running!
 echo Please take a screenshot manually (Alt+PrtScn or use Snipping Tool)
 echo Screenshots folder: %CD%\screenshots
 echo.
-echo Press any key to continue...
-pause >nul
-
+echo Screenshot saved!
 echo.
 echo To close the game, close the game window or press Ctrl+C here

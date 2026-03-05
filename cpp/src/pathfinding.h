@@ -1,6 +1,8 @@
 #pragma once
 #include "raylib.h"
 #include "building.h"
+#include "tilemap/tilemap.h"
+#include "tilemap/coordinates.h"
 #include <vector>
 #include <queue>
 #include <map>
@@ -31,89 +33,63 @@ struct CompareNode {
 // NAVIGATION GRID
 // ============================================================================
 
+// Forward declaration
+class TileMap;
+
 class NavigationGrid {
 public:
-    NavigationGrid() : width(0), height(0), cellSize(16) {}
+    NavigationGrid() : tileMap(nullptr), width(0), height(0) {}
     
-    // Ініціалізація сітки
-    void init(int mapWidth, int mapHeight, int cellSizePixels = 16) {
-        cellSize = cellSizePixels;
-        width = (mapWidth + cellSize - 1) / cellSize;
-        height = (mapHeight + cellSize - 1) / cellSize;
-        cells.resize(width * height, true); // Всі клітинки спочатку прохідні
+    // Ініціалізація сітки з TileMap
+    void init(const TileMap* map) {
+        tileMap = map;
+        if (tileMap) {
+            width = tileMap->getWidth();
+            height = tileMap->getHeight();
+        }
     }
     
-    // Перевірка чи клітинка прохідна
-    bool isWalkable(int gridX, int gridY) const {
-        if (gridX < 0 || gridX >= width || gridY < 0 || gridY >= height) {
+    // Перевірка чи клітинка прохідна (делегує до TileMap)
+    bool isWalkable(int row, int col) const {
+        if (!tileMap) return false;
+        if (row < 0 || row >= height || col < 0 || col >= width) {
             return false;
         }
-        return cells[gridY * width + gridX];
+        return tileMap->isPassable(row, col);
     }
     
-    // Конвертація координат: світ -> сітка
-    void worldToGrid(int worldX, int worldY, int& gridX, int& gridY) const {
-        gridX = worldX / cellSize;
-        gridY = worldY / cellSize;
-        
-        // Bounds checking - обмежуємо координати в межах сітки
-        if (gridX < 0) gridX = 0;
-        if (gridX >= width) gridX = width - 1;
-        if (gridY < 0) gridY = 0;
-        if (gridY >= height) gridY = height - 1;
+    // Конвертація координат: екран -> сітка (ізометрична)
+    GridCoords worldToGrid(const ScreenCoords& screen) const {
+        return CoordinateConverter::screenToGrid(screen);
     }
     
-    // Конвертація координат: сітка -> світ (центр клітинки)
-    void gridToWorld(int gridX, int gridY, int& worldX, int& worldY) const {
-        // Bounds checking - обмежуємо координати в межах сітки
-        int clampedX = gridX;
-        int clampedY = gridY;
-        if (clampedX < 0) clampedX = 0;
-        if (clampedX >= width) clampedX = width - 1;
-        if (clampedY < 0) clampedY = 0;
-        if (clampedY >= height) clampedY = height - 1;
-        
-        worldX = clampedX * cellSize + cellSize / 2;
-        worldY = clampedY * cellSize + cellSize / 2;
+    // Конвертація координат: сітка -> екран (ізометрична)
+    ScreenCoords gridToWorld(const GridCoords& grid) const {
+        return CoordinateConverter::gridToScreen(grid);
     }
     
-    // Позначити клітинку як перешкоду або вільну
-    void markObstacle(int gridX, int gridY, bool blocked) {
-        if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
-            cells[gridY * width + gridX] = !blocked;
-        }
+    // Позначити клітинку як перешкоду (тепер не використовується, бо TileMap керує прохідністю)
+    void markObstacle(int row, int col, bool blocked) {
+        // Deprecated: TileMap тепер керує прохідністю
+        // Залишаємо для сумісності, але нічого не робимо
     }
     
-    // Оновити сітку з будівель
+    // Оновити сітку з будівель (використовує GridCoords)
     void updateFromBuildings(const std::vector<Building>& buildings) {
-        // Спочатку очищаємо всі клітинки
-        std::fill(cells.begin(), cells.end(), true);
+        // Примітка: Тепер будівлі мають GridCoords позиції
+        // TileMap керує прохідністю, тому ця функція може бути спрощена
+        // або видалена в майбутньому. Поки залишаємо для сумісності.
         
-        // Позначаємо будівлі як перешкоди
-        for (const auto& building : buildings) {
-            Rectangle rect = building.getRect();
-            
-            // Конвертуємо прямокутник будівлі в клітинки сітки
-            int startX, startY, endX, endY;
-            worldToGrid((int)rect.x, (int)rect.y, startX, startY);
-            worldToGrid((int)(rect.x + rect.width), (int)(rect.y + rect.height), endX, endY);
-            
-            // Позначаємо всі клітинки в прямокутнику
-            for (int y = startY; y <= endY; y++) {
-                for (int x = startX; x <= endX; x++) {
-                    markObstacle(x, y, true);
-                }
-            }
-        }
+        // TODO: Можливо потрібно оновлювати TileMap напряму,
+        // позначаючи тайли під будівлями як непрохідні
     }
     
-    // Отримати розміри сітки
+    // Отримати розміри сітки (в тайлах)
     int getWidth() const { return width; }
     int getHeight() const { return height; }
-    int getCellSize() const { return cellSize; }
     
     // Отримати сусідів для A* (8 напрямків)
-    std::vector<GridNode> getNeighbors(int gridX, int gridY) const {
+    std::vector<GridNode> getNeighbors(int row, int col) const {
         std::vector<GridNode> neighbors;
         
         // 8 напрямків: вгору-ліво, вгору, вгору-право, ліво, право, вниз-ліво, вниз, вниз-право
@@ -121,12 +97,12 @@ public:
         const int dy[] = {-1, -1, -1, 0, 0, 1, 1, 1};
         
         for (int i = 0; i < 8; i++) {
-            int nx = gridX + dx[i];
-            int ny = gridY + dy[i];
+            int nrow = row + dy[i];
+            int ncol = col + dx[i];
             
             // Перевіряємо чи сусід валідний і прохідний
-            if (isWalkable(nx, ny)) {
-                GridNode neighbor(nx, ny);
+            if (isWalkable(nrow, ncol)) {
+                GridNode neighbor(ncol, nrow);  // GridNode використовує (x, y) = (col, row)
                 neighbors.push_back(neighbor);
             }
         }
@@ -135,9 +111,8 @@ public:
     }
     
 private:
-    int width, height;      // Розмір сітки в клітинках
-    int cellSize;           // Розмір клітинки в пікселях
-    std::vector<bool> cells; // Масив прохідності клітинок
+    const TileMap* tileMap;  // Посилання на TileMap для прохідності
+    int width, height;       // Розмір сітки в тайлах (кешовано з TileMap)
 };
 
 // ============================================================================
@@ -148,23 +123,27 @@ class AStarPathfinder {
 public:
     // Знайти шлях від start до goal
     std::vector<Vector2> findPath(Vector2 start, Vector2 goal, const NavigationGrid& grid) {
-        // Конвертуємо світові координати в сітку
-        int startX, startY, goalX, goalY;
-        grid.worldToGrid((int)start.x, (int)start.y, startX, startY);
-        grid.worldToGrid((int)goal.x, (int)goal.y, goalX, goalY);
+        // Конвертуємо світові координати в сітку (ізометрична конвертація)
+        GridCoords startGrid = grid.worldToGrid(ScreenCoords(start.x, start.y));
+        GridCoords goalGrid = grid.worldToGrid(ScreenCoords(goal.x, goal.y));
+        
+        int startX = startGrid.col;
+        int startY = startGrid.row;
+        int goalX = goalGrid.col;
+        int goalY = goalGrid.row;
         
         // Якщо стартова позиція заблокована, знаходимо найближчу вільну клітинку
-        if (!grid.isWalkable(startX, startY)) {
+        if (!grid.isWalkable(startY, startX)) {
             bool foundFree = false;
             // Шукаємо в радіусі 3 клітинки
             for (int radius = 1; radius <= 3 && !foundFree; radius++) {
                 for (int dy = -radius; dy <= radius && !foundFree; dy++) {
                     for (int dx = -radius; dx <= radius && !foundFree; dx++) {
-                        int nx = startX + dx;
-                        int ny = startY + dy;
-                        if (grid.isWalkable(nx, ny)) {
-                            startX = nx;
-                            startY = ny;
+                        int nrow = startY + dy;
+                        int ncol = startX + dx;
+                        if (grid.isWalkable(nrow, ncol)) {
+                            startX = ncol;
+                            startY = nrow;
                             foundFree = true;
                         }
                     }
@@ -178,7 +157,7 @@ public:
         }
         
         // Перевіряємо чи ціль досяжна
-        if (!grid.isWalkable(goalX, goalY)) {
+        if (!grid.isWalkable(goalY, goalX)) {
             printf("[A*] Goal is not walkable!\n");
             return std::vector<Vector2>(); // Порожній шлях
         }
@@ -290,9 +269,10 @@ private:
         GridNode* current = goalNode;
         
         while (current != nullptr) {
-            int worldX, worldY;
-            grid.gridToWorld(current->x, current->y, worldX, worldY);
-            path.push_back({(float)worldX, (float)worldY});
+            // Конвертуємо grid координати в screen координати (ізометрична конвертація)
+            GridCoords gridPos(current->y, current->x);  // row, col
+            ScreenCoords screenPos = grid.gridToWorld(gridPos);
+            path.push_back({screenPos.x, screenPos.y});
             current = current->parent;
         }
         
@@ -330,9 +310,13 @@ private:
     
     // Перевірка прямої видимості між двома точками
     bool hasLineOfSight(Vector2 start, Vector2 end, const NavigationGrid& grid) const {
-        int x0, y0, x1, y1;
-        grid.worldToGrid((int)start.x, (int)start.y, x0, y0);
-        grid.worldToGrid((int)end.x, (int)end.y, x1, y1);
+        GridCoords startGrid = grid.worldToGrid(ScreenCoords(start.x, start.y));
+        GridCoords endGrid = grid.worldToGrid(ScreenCoords(end.x, end.y));
+        
+        int x0 = startGrid.col;
+        int y0 = startGrid.row;
+        int x1 = endGrid.col;
+        int y1 = endGrid.row;
         
         // Алгоритм Брезенхема для лінії
         int dx = abs(x1 - x0);
@@ -343,7 +327,7 @@ private:
         
         int x = x0, y = y0;
         while (true) {
-            if (!grid.isWalkable(x, y)) {
+            if (!grid.isWalkable(y, x)) {  // row, col
                 return false;
             }
             
@@ -394,9 +378,9 @@ class PathfindingManager {
 public:
     PathfindingManager() : maxCalculationsPerFrame(5) {}
     
-    // Ініціалізація
-    void init(int mapWidth, int mapHeight) {
-        grid.init(mapWidth, mapHeight, 16);
+    // Ініціалізація з TileMap
+    void init(const TileMap* tileMap) {
+        grid.init(tileMap);
     }
     
     // Запит на обчислення шляху

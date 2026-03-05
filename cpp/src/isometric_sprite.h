@@ -1,6 +1,7 @@
 #pragma once
 #include "raylib.h"
 #include "tilemap/coordinates.h"
+#include <string>
 
 // IsometricSprite class for rendering isometric sprites with debug fallback
 class IsometricSprite {
@@ -9,10 +10,17 @@ private:
     bool loaded;
     Vector2 anchorPoint;  // Bottom center anchor
     int width, height;
+    std::string filepath;  // Зберігаємо шлях для перезавантаження
     
 public:
     // Constructor
     IsometricSprite();
+    
+    // Copy constructor
+    IsometricSprite(const IsometricSprite& other);
+    
+    // Assignment operator
+    IsometricSprite& operator=(const IsometricSprite& other);
     
     // Destructor
     ~IsometricSprite();

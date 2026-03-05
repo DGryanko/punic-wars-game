@@ -46,15 +46,13 @@ public:
             return false;
         }
         
-        // Конвертуємо тайлові координати в екранні
-        GridCoords gridPos(row, col);
-        ScreenCoords screenPos = CoordinateConverter::gridToScreenWithOffset(gridPos);
+        // Встановлюємо grid координати будівлі (джерело істини)
+        building.position = GridCoords(row, col);
         
-        // Встановлюємо позицію будівлі
-        building.x = (int)screenPos.x;
-        building.y = (int)screenPos.y;
+        // Синхронізуємо screen координати (x, y) з position
+        building.syncScreenCoords();
         
-        // Зберігаємо тайлові координати в будівлі (додамо нові поля)
+        // Зберігаємо тайлові координати в будівлі (compatibility layer)
         building.tile_row = row;
         building.tile_col = col;
         
@@ -62,11 +60,10 @@ public:
         int tileKey = row * 1000 + col;
         occupiedTiles[tileKey] = buildingIndex;
         
-        // Блокуємо тайл в pathfinding
+        // Блокуємо тайл в pathfinding (використовуємо GridCoords будівлі)
         if (pathfinding) {
-            int gridX, gridY;
-            pathfinding->getGrid().worldToGrid(building.x + 40, building.y + 30, gridX, gridY);
-            const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(gridX, gridY, true);
+            GridCoords buildingGrid = building.getGridPosition();
+            const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(buildingGrid.row, buildingGrid.col, true);
         }
         
         printf("[BuildingPlacer] Building placed at tile (%d, %d), screen (%d, %d)\n", 
@@ -81,11 +78,10 @@ public:
         int tileKey = building.tile_row * 1000 + building.tile_col;
         occupiedTiles.erase(tileKey);
         
-        // Розблоковуємо тайл в pathfinding
+        // Розблоковуємо тайл в pathfinding (використовуємо GridCoords будівлі)
         if (pathfinding) {
-            int gridX, gridY;
-            pathfinding->getGrid().worldToGrid(building.x + 40, building.y + 30, gridX, gridY);
-            const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(gridX, gridY, false);
+            GridCoords buildingGrid = building.getGridPosition();
+            const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(buildingGrid.row, buildingGrid.col, false);
         }
         
         printf("[BuildingPlacer] Building removed from tile (%d, %d)\n", 

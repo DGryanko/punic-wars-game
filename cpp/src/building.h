@@ -93,31 +93,31 @@ struct Building {
         std::string spritePath = "assets/sprites/isometric/buildings/";
         switch (type) {
             case HQ_ROME:
-                spritePath += "hq_rome.png";
+                spritePath += "Praetorium.png";
                 break;
             case HQ_CARTHAGE:
-                spritePath += "hq_carthage.png";
+                spritePath += "Skene.png";
                 break;
             case BARRACKS_ROME:
-                spritePath += "barracks_rome.png";
+                spritePath += "Contubernium.png";
                 break;
             case BARRACKS_CARTHAGE:
-                spritePath += "barracks_carthage.png";
+                spritePath += "LibTent1.png";
                 break;
             case QUESTORIUM_ROME:
-                spritePath += "questorium_rome.png";
+                spritePath += "Questorium.png";
                 break;
             case LIBTENT_1:
-                spritePath += "libtent_1.png";
+                spritePath += "LibTent1.png";
                 break;
             case LIBTENT_2:
-                spritePath += "libtent_2.png";
+                spritePath += "LibTent2.png";
                 break;
             case LIBTENT_3:
-                spritePath += "libtent_3.png";
+                spritePath += "LibTent3.png";
                 break;
             case TENTORIUM:
-                spritePath += "tentorium.png";
+                spritePath += "Tentorium.png";
                 break;
         }
         
@@ -131,47 +131,47 @@ struct Building {
         switch (type) {
             case HQ_ROME:
                 name = "Praetorium";
-                texture_offset = {-192, -112};  // Центруємо більшу текстуру
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;           // Повний розмір (384x224)
                 break;
             case HQ_CARTHAGE:
                 name = "Main Tent";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case BARRACKS_ROME:
                 name = "Contubernium";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case BARRACKS_CARTHAGE:
                 name = "Mercenary Camp";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case QUESTORIUM_ROME:
                 name = "Questorium";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_1:
                 name = "Libyan Tent I";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_2:
                 name = "Libyan Tent II";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case LIBTENT_3:
                 name = "Libyan Tent III";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
             case TENTORIUM:
                 name = "Tentorium";
-                texture_offset = {-192, -112};
+                texture_offset = {-192, -160};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
         }

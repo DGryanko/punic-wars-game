@@ -1,0 +1,38 @@
+# Makefile для тестів позиціонування в ізометричній системі
+
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -I../src
+LDFLAGS = -lraylib -lopengl32 -lgdi32 -lwinmm
+
+# Тестові файли
+TEST_EXPLORATORY = test_isometric_positioning_bugs
+TEST_PRESERVATION = test_isometric_positioning_preservation
+
+# Правила компіляції
+all: $(TEST_EXPLORATORY).exe
+
+$(TEST_EXPLORATORY).exe: $(TEST_EXPLORATORY).cpp
+	$(CXX) $(CXXFLAGS) -o $(TEST_EXPLORATORY).exe $(TEST_EXPLORATORY).cpp $(LDFLAGS)
+
+$(TEST_PRESERVATION).exe: $(TEST_PRESERVATION).cpp
+	$(CXX) $(CXXFLAGS) -o $(TEST_PRESERVATION).exe $(TEST_PRESERVATION).cpp $(LDFLAGS)
+
+# Запуск тестів
+run_exploratory: $(TEST_EXPLORATORY).exe
+	./$(TEST_EXPLORATORY).exe
+
+run_preservation: $(TEST_PRESERVATION).exe
+	./$(TEST_PRESERVATION).exe
+
+run_all: $(TEST_EXPLORATORY).exe $(TEST_PRESERVATION).exe
+	@echo "Running exploratory tests..."
+	./$(TEST_EXPLORATORY).exe
+	@echo ""
+	@echo "Running preservation tests..."
+	./$(TEST_PRESERVATION).exe
+
+# Очищення
+clean:
+	rm -f *.exe *.o
+
+.PHONY: all run_exploratory run_preservation run_all clean

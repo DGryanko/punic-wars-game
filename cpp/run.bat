@@ -4,5 +4,4 @@ if exist "punic_wars.exe" (
     punic_wars.exe
 ) else (
     echo Game not compiled yet. Run compile.bat first.
-    pause
 )
