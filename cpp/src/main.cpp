@@ -5,6 +5,7 @@
 #include "building_placer.h"
 #include "faction_spawner.h"
 #include "unit_order_panel.h"
+#include "slave_build_panel.h"
 #include "resource_display.h"
 #include "unit.h"
 #include "resource.h"
@@ -137,6 +138,7 @@ FactionSpawner* factionSpawner = nullptr;
 
 // UI системи
 UnitOrderPanel* unitOrderPanel = nullptr;
+SlaveBuildPanel* slaveBuildPanel = nullptr;
 ResourceDisplay* resourceDisplay = nullptr;
 
 // Система виділення областю
@@ -535,6 +537,10 @@ void clearAllSelections() {
     if (unitOrderPanel) {
         unitOrderPanel->setSelectedBuilding(-1);
     }
+    // Оновлюємо панель будівництва
+    if (slaveBuildPanel) {
+        slaveBuildPanel->setSelectedUnit(-1);
+    }
 }
 
 // Функція для оновлення курсора
@@ -613,206 +619,111 @@ void DrawCustomCursor() {
 // Функція для обробки збору ресурсів
 void ProcessResourceHarvesting() {
     for (auto& unit : units) {
-        if (unit.faction == playerFaction && unit.can_harvest) {
-            // Якщо раб має призначену ресурсну точку
-            if (unit.hasAssignedResource()) {
-                // Перевіряємо чи ресурс ще існує
-                bool resourceExists = false;
-                for (const auto& resource : resources) {
-                    if (!resource.depleted) {
-                        float dist = sqrt(pow(unit.assigned_resource_x - (resource.x + 20), 2) + 
-                                        pow(unit.assigned_resource_y - (resource.y + 20), 2));
-                        if (dist < 5) {
-                            resourceExists = true;
-                            break;
-                        }
-                    }
-                }
-                
-                // Якщо ресурс вичерпано, скидаємо призначення
-                if (!resourceExists) {
-                    unit.assigned_resource_x = -1;
-                    unit.assigned_resource_y = -1;
-                    unit.stopHarvesting();
-                    continue;
-                }
-                
-                // Якщо раб повний, йти здавати ресурси
-                if (!unit.canCarryMore() && (unit.carrying_food > 0 || unit.carrying_gold > 0)) {
-                    // КРИТИЧНО: примусово зупинити збір
-                    unit.is_harvesting = false;
-                    
-                    // Перевірка, чи поруч з будівлею для здачі
-                    float distToBuilding = sqrt(pow(unit.x - unit.dropoff_building_x, 2) + 
-                                               pow(unit.y - unit.dropoff_building_y, 2));
-                    
-                    if (distToBuilding < 50) {
-                        // Здати ресурси
-                        int food, gold;
-                        unit.dropResources(food, gold);
-                        
-                        if (playerFaction == ROME) {
-                            rome_food += food;
-                            rome_money += gold;
-                        } else {
-                            carth_food += food;
-                            carth_money += gold;
-                        }
-                        
-                        printf("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
-                               food, gold, rome_food, rome_money);
-                        // Повернутися до ресурсу
-                        unit.moveTo(unit.assigned_resource_x, unit.assigned_resource_y);
-                        printf("[RETURN] Returning to resource at (%d,%d)\n", 
-                               unit.assigned_resource_x, unit.assigned_resource_y);
-                    } else {
-                        // Перевіряємо чи раб рухається до правильної цілі
-                        bool movingToCorrectTarget = (unit.target_x == unit.dropoff_building_x && 
-                                                     unit.target_y == unit.dropoff_building_y);
-                        
-                        // Дебаг лог кожні 30 кадрів
-                        static int debugCounter = 0;
-                        if (++debugCounter % 30 == 0) {
-                            printf("[FULL DEBUG] Slave at (%d,%d) full, target=(%d,%d), dropoff=(%d,%d), is_moving=%d, movingToCorrect=%d\n",
-                                   unit.x, unit.y, unit.target_x, unit.target_y, 
-                                   unit.dropoff_building_x, unit.dropoff_building_y,
-                                   unit.is_moving, movingToCorrectTarget);
-                        }
-                        
-                        // Якщо не рухається до будівлі, примусово відправити
-                        if (!movingToCorrectTarget) {
-                            unit.moveTo(unit.dropoff_building_x, unit.dropoff_building_y);
-                            printf("[FORCE MOVE] Forcing move to dropoff building at (%d, %d)\n", 
-                                   unit.dropoff_building_x, unit.dropoff_building_y);
-                        }
-                    }
-                }
-                // Якщо раб не повний і поруч з ресурсом, збирати
-                else {
-                    bool foundNearbyResource = false;
-                    for (auto& resource : resources) {
-                        if (!resource.depleted) {
-                            float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + 
-                                                pow(unit.y - (resource.y + 20), 2));
-                            if (distance < 40) {
-                                // Почати збір
-                                unit.startHarvesting();
-                                
-                                // Збираємо ресурс
-                                int harvestAmount = 1; // 1 одиниця за кадр (зменшено в 2 рази)
-                                int harvested = resource.harvest(harvestAmount);
-                                
-                                if (harvested > 0) {
-                                    if (resource.type == FOOD_SOURCE) {
-                                        unit.addResources(harvested, 0);
-                                    } else if (resource.type == GOLD_SOURCE) {
-                                        unit.addResources(0, harvested);
-                                    }
-                                    
-                                    // Логуємо тільки кожні 30 кадрів (раз на пів секунди)
-                                    static int harvestLogCounter = 0;
-                                    if (++harvestLogCounter % 30 == 0) {
-                                        printf("[HARVEST] Slave at (%d,%d) harvesting. Carrying: %d/%d\n", 
-                                               unit.x, unit.y, unit.carrying_food + unit.carrying_gold, unit.max_carry_capacity);
-                                    }
-                                }
-                                
-                                foundNearbyResource = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Якщо не знайшли ресурс поблизу і не рухаємося, йти до призначеного ресурсу
-                    if (!foundNearbyResource && !unit.is_moving) {
-                        float distToAssigned = sqrt(pow(unit.x - unit.assigned_resource_x, 2) + 
-                                                   pow(unit.y - unit.assigned_resource_y, 2));
-                        if (distToAssigned > 5) {
-                            unit.moveTo(unit.assigned_resource_x, unit.assigned_resource_y);
-                            printf("[GOTO] Slave moving to assigned resource at (%d,%d)\n", 
-                                   unit.assigned_resource_x, unit.assigned_resource_y);
-                        }
+        if (unit.faction != playerFaction || !unit.can_harvest) continue;
+        
+        // Якщо раб має призначену ресурсну точку - автоматичний цикл
+        if (unit.hasAssignedResource()) {
+            GridCoords unitPos = unit.getGridPosition();
+            GridCoords resourcePos = unit.assigned_resource_position;
+            GridCoords dropoffPos = unit.assigned_dropoff_position;
+            
+            // Перевіряємо чи ресурс ще існує
+            bool resourceExists = false;
+            ResourcePoint* targetResource = nullptr;
+            for (auto& resource : resources) {
+                if (!resource.depleted) {
+                    GridCoords resPos = resource.getGridPosition();
+                    if (resPos.row == resourcePos.row && resPos.col == resourcePos.col) {
+                        resourceExists = true;
+                        targetResource = &resource;
+                        break;
                     }
                 }
             }
-            // Старий код для рабів без призначеної точки (ручне керування або після скидання)
-            else if (!unit.is_moving) {
-                // Перевіряємо, чи юніт поруч з ресурсом - ЗАВЖДИ збирати якщо є місце
-                for (auto& resource : resources) {
-                    if (!resource.depleted && unit.canCarryMore()) {
-                        float distance = sqrt(pow(unit.x - (resource.x + 20), 2) + pow(unit.y - (resource.y + 20), 2));
-                        if (distance < 40) { // Збільшено радіус з 30 до 40
-                            // Почати збір
-                            unit.startHarvesting();
-                            
-                            // Збираємо ресурс
-                            int harvestAmount = 1; // 1 одиниця за кадр (зменшено в 2 рази)
-                            int harvested = resource.harvest(harvestAmount);
-                            
-                            if (harvested > 0) {
-                                if (resource.type == FOOD_SOURCE) {
-                                    unit.addResources(harvested, 0);
-                                } else if (resource.type == GOLD_SOURCE) {
-                                    unit.addResources(0, harvested);
-                                }
-                            }
-                            
-                            break;
-                        }
-                    }
-                }
+            
+            // Якщо ресурс вичерпано, скидаємо призначення
+            if (!resourceExists) {
+                unit.clearResourceAssignment();
+                unit.stopHarvesting();
+                printf("[HARVEST] Resource depleted, stopping cycle\n");
+                continue;
+            }
+            
+            // STATE MACHINE: Автоматичний цикл збору
+            
+            // STATE 1: Якщо раб повний - йти здавати ресурси
+            if (!unit.canCarryMore() && (unit.carrying_food > 0 || unit.carrying_gold > 0)) {
+                unit.is_harvesting = false;
                 
-                // Перевіряємо, чи юніт поруч з квесторієм або HQ для здачі ресурсів
-                if (unit.carrying_food > 0 || unit.carrying_gold > 0) {
-                    // Спочатку шукаємо квесторіум
-                    bool foundQuestorium = false;
-                    for (const auto& building : buildings) {
-                        if (building.faction == playerFaction && building.type == QUESTORIUM_ROME) {
-                            float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
-                            if (distance < 50) {
-                                // Здати ресурси
-                                int food, gold;
-                                unit.dropResources(food, gold);
-                                
-                                if (playerFaction == ROME) {
-                                    rome_food += food;
-                                    rome_money += gold;
-                                } else {
-                                    carth_food += food;
-                                    carth_money += gold;
-                                }
-                                
-                                unit.stopHarvesting();
-                                foundQuestorium = true;
-                                break;
-                            }
-                        }
+                // Обчислюємо відстань до будівлі здачі
+                float distToDropoff = sqrt(pow(unitPos.row - dropoffPos.row, 2) + 
+                                          pow(unitPos.col - dropoffPos.col, 2));
+                
+                // Якщо поруч з будівлею (20 пікселів від центру за вашим запитом)
+                if (distToDropoff < 20.0f / 64.0f) { // 20 пікселів / 64 пікселі на тайл
+                    // Здати ресурси
+                    int food, gold;
+                    unit.dropResources(food, gold);
+                    
+                    if (playerFaction == ROME) {
+                        rome_food += food;
+                        rome_money += gold;
+                    } else {
+                        carth_food += food;
+                        carth_money += gold;
                     }
                     
-                    // Якщо не знайшли квесторіум, шукаємо HQ
-                    if (!foundQuestorium) {
-                        for (const auto& building : buildings) {
-                            if (building.faction == playerFaction && 
-                                (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
-                                float distance = sqrt(pow(unit.x - (building.x + 40), 2) + pow(unit.y - (building.y + 30), 2));
-                                if (distance < 50) {
-                                    // Здати ресурси
-                                    int food, gold;
-                                    unit.dropResources(food, gold);
-                                    
-                                    if (playerFaction == ROME) {
-                                        rome_food += food;
-                                        rome_money += gold;
-                                    } else {
-                                        carth_food += food;
-                                        carth_money += gold;
-                                    }
-                                    
-                                    unit.stopHarvesting();
-                                    break;
-                                }
-                            }
+                    printf("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
+                           food, gold, rome_food, rome_money);
+                    
+                    // Повернутися до ресурсу
+                    unit.moveTo(resourcePos);
+                    printf("[RETURN] Returning to resource at grid(%d,%d)\n", resourcePos.row, resourcePos.col);
+                } else {
+                    // Рухаємося до будівлі здачі
+                    if (!unit.is_moving || !(unit.target_position == dropoffPos)) {
+                        unit.moveTo(dropoffPos);
+                        printf("[MOVE_TO_DROPOFF] Moving to dropoff at grid(%d,%d), distance=%.1f\n", 
+                               dropoffPos.row, dropoffPos.col, distToDropoff);
+                    }
+                }
+            }
+            // STATE 2: Якщо раб не повний - збирати ресурс
+            else {
+                // Обчислюємо відстань до ресурсу
+                float distToResource = sqrt(pow(unitPos.row - resourcePos.row, 2) + 
+                                           pow(unitPos.col - resourcePos.col, 2));
+                
+                // Якщо поруч з ресурсом (в межах 2 тайлів)
+                if (distToResource < 2.0f) {
+                    // Почати збір
+                    unit.startHarvesting();
+                    unit.is_moving = false;
+                    
+                    // Збираємо ресурс
+                    int harvestAmount = 1; // 1 одиниця за кадр
+                    int harvested = targetResource->harvest(harvestAmount);
+                    
+                    if (harvested > 0) {
+                        if (targetResource->type == FOOD_SOURCE) {
+                            unit.addResources(harvested, 0);
+                        } else if (targetResource->type == GOLD_SOURCE) {
+                            unit.addResources(0, harvested);
                         }
+                        
+                        // Логуємо тільки кожні 30 кадрів
+                        static int harvestLogCounter = 0;
+                        if (++harvestLogCounter % 30 == 0) {
+                            printf("[HARVEST] Slave harvesting. Carrying: %d/%d\n", 
+                                   unit.carrying_food + unit.carrying_gold, unit.max_carry_capacity);
+                        }
+                    }
+                } else {
+                    // Рухаємося до ресурсу
+                    if (!unit.is_moving || !(unit.target_position == resourcePos)) {
+                        unit.moveTo(resourcePos);
+                        printf("[MOVE_TO_RESOURCE] Moving to resource at grid(%d,%d), distance=%.1f\n", 
+                               resourcePos.row, resourcePos.col, distToResource);
                     }
                 }
             }
@@ -1112,9 +1023,6 @@ void DrawSettings() {
     if (backButton.IsClicked()) {
         currentState = returnFromSettings;  // Повертаємось туди звідки прийшли
     }
-    
-    // Інструкції
-    DrawText("Adjust game settings", 430, 510, 16, GRAY);
     
     // Малювання курсора
     DrawCustomCursor();
@@ -1428,6 +1336,16 @@ void HandleClicks() {
         }
     }
     
+    // Перевіряємо клік по панелі будівництва рабом
+    if (slaveBuildPanel && slaveBuildPanel->isVisible()) {
+        slaveBuildPanel->handleClick(mousePos);
+        // Якщо клік був на панелі, не обробляємо далі
+        Rectangle panelRect = {10, 950, 300, 100};
+        if (CheckCollisionPointRec(mousePos, panelRect)) {
+            return;
+        }
+    }
+    
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
         // ВАЖЛИВО: Конвертуємо координати миші в світові координати з урахуванням камери
         Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
@@ -1471,6 +1389,12 @@ void HandleClicks() {
                     lastClickedUnit = i;
                     lastClickTime = currentTime;
                     foundUnit = true;
+                    
+                    // Оновлюємо панель будівництва для рабів
+                    if (slaveBuildPanel && units[i].unit_type == "slave") {
+                        slaveBuildPanel->setSelectedUnit(i);
+                        printf("[CLICK] Updated slave build panel\n");
+                    }
                     break;
                 }
             }
@@ -2003,6 +1927,11 @@ void DrawGame() {
         unitOrderPanel->draw();
     }
     
+    // Панель будівництва рабом
+    if (slaveBuildPanel) {
+        slaveBuildPanel->draw();
+    }
+    
     // Малювання курсора
     DrawCustomCursor();
     
@@ -2163,6 +2092,9 @@ int main() {
     unitOrderPanel = new UnitOrderPanel();
     unitOrderPanel->init(&buildings, playerFaction);
     
+    slaveBuildPanel = new SlaveBuildPanel();
+    slaveBuildPanel->init(&units, &buildings, playerFaction);
+    
     resourceDisplay = new ResourceDisplay();
     resourceDisplay->init(resourcePanel, playerFaction);
     
@@ -2269,6 +2201,7 @@ int main() {
     if (buildingPlacer) delete buildingPlacer;
     if (factionSpawner) delete factionSpawner;
     if (unitOrderPanel) delete unitOrderPanel;
+    if (slaveBuildPanel) delete slaveBuildPanel;
     if (resourceDisplay) delete resourceDisplay;
     
     CloseAudioDevice();

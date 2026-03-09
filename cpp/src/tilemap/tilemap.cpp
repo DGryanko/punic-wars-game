@@ -5,6 +5,8 @@ TileMap::TileMap(int w, int h, unsigned int s)
     : width(w), height(h), seed(s) {
     // Ініціалізуємо масив тайлів
     tiles.resize(width * height, static_cast<uint8_t>(TerrainType::GRASS));
+    // Ініціалізуємо масив динамічних перешкод (всі прохідні за замовчуванням)
+    dynamicObstacles.resize(width * height, false);
 }
 
 TerrainType TileMap::getTile(int row, int col) const {
@@ -31,8 +33,22 @@ bool TileMap::isPassable(int row, int col) const {
     if (!isValidCoord(row, col)) {
         return false;
     }
+    // Перевіряємо динамічні перешкоди (будівлі)
+    if (dynamicObstacles[row * width + col]) {
+        return false;
+    }
+    // Перевіряємо тип місцевості
     TerrainType type = getTile(row, col);
     return ::isPassable(type);  // Використовуємо глобальну функцію з terrain.h
+}
+
+void TileMap::setPassable(int row, int col, bool passable) {
+    if (!isValidCoord(row, col)) {
+        return;
+    }
+    // true означає що тайл заблокований (непрохідний)
+    // false означає що тайл вільний (прохідний)
+    dynamicObstacles[row * width + col] = !passable;
 }
 
 float TileMap::getSpeedModifier(int row, int col) const {

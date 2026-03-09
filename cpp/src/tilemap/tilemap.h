@@ -11,6 +11,7 @@ private:
     int width;   // Ширина в тайлах
     int height;  // Висота в тайлах
     std::vector<uint8_t> tiles;  // Одновимірний масив для оптимізації пам'яті
+    std::vector<bool> dynamicObstacles;  // Динамічні перешкоди (будівлі)
     unsigned int seed;
     
 public:
@@ -30,6 +31,9 @@ public:
     // Запити про місцевість
     bool isPassable(int row, int col) const;
     float getSpeedModifier(int row, int col) const;
+    
+    // Динамічні перешкоди (будівлі)
+    void setPassable(int row, int col, bool passable);
     
     // Статистика карти
     int countPassableTiles() const;

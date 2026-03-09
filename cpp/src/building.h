@@ -185,21 +185,11 @@ struct Building {
     
     // Перевірка чи займає будівля дану grid клітинку
     bool occupiesGridCell(GridCoords cell) const {
-        // ВАЖЛИВО: Спрайт будівлі візуально зміщений
-        // Треба зміщення -96 пікселів = -1.5 тайла
-        // В ізометричній системі: -1.5 тайла по Y = -2 row, 0 col (приблизно)
-        int offsetRow = -2;
-        int offsetCol = 0;
-        
-        bool occupies = cell.row >= position.row + offsetRow && 
-               cell.row < position.row + offsetRow + footprint.row &&
-               cell.col >= position.col + offsetCol && 
-               cell.col < position.col + offsetCol + footprint.col;
-        
-        if (occupies) {
-            printf("[occupiesGridCell] HIT! Building '%s' at grid(%d,%d) with offset(%d,%d) occupies cell(%d,%d)\n",
-                   name.c_str(), position.row, position.col, offsetRow, offsetCol, cell.row, cell.col);
-        }
+        // Просто перевіряємо чи клітинка в межах footprint будівлі
+        bool occupies = cell.row >= position.row && 
+               cell.row < position.row + footprint.row &&
+               cell.col >= position.col && 
+               cell.col < position.col + footprint.col;
         
         return occupies;
     }

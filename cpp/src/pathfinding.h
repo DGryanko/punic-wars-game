@@ -76,12 +76,28 @@ public:
     
     // Оновити сітку з будівель (використовує GridCoords)
     void updateFromBuildings(const std::vector<Building>& buildings) {
-        // Примітка: Тепер будівлі мають GridCoords позиції
-        // TileMap керує прохідністю, тому ця функція може бути спрощена
-        // або видалена в майбутньому. Поки залишаємо для сумісності.
+        if (!tileMap) return;
         
-        // TODO: Можливо потрібно оновлювати TileMap напряму,
-        // позначаючи тайли під будівлями як непрохідні
+        // Спочатку очищаємо всі будівельні перешкоди
+        for (int row = 0; row < height; row++) {
+            for (int col = 0; col < width; col++) {
+                const_cast<TileMap*>(tileMap)->setPassable(row, col, true);
+            }
+        }
+        
+        // Позначаємо тайли під будівлями як непрохідні
+        for (const auto& building : buildings) {
+            GridCoords pos = building.getGridPosition();
+            GridCoords footprint = building.footprint;  // FIXED: footprint is a field, not a method
+            
+            for (int dr = 0; dr < footprint.row; dr++) {
+                for (int dc = 0; dc < footprint.col; dc++) {
+                    int row = pos.row + dr;
+                    int col = pos.col + dc;
+                    const_cast<TileMap*>(tileMap)->setPassable(row, col, false);
+                }
+            }
+        }
     }
     
     // Отримати розміри сітки (в тайлах)

@@ -42,10 +42,15 @@ struct Unit {
     int carrying_food = 0;         // Скільки їжі несе
     int carrying_gold = 0;         // Скільки золота несе
     int max_carry_capacity = 20;   // Максимальна вантажопідйомність
-    int assigned_resource_x = -1;  // Призначена ресурсна точка X
-    int assigned_resource_y = -1;  // Призначена ресурсна точка Y
-    int dropoff_building_x = -1;   // Будівля для здачі X
-    int dropoff_building_y = -1;   // Будівля для здачі Y
+    int assigned_resource_x = -1;  // Призначена ресурсна точка X (deprecated - screen coords)
+    int assigned_resource_y = -1;  // Призначена ресурсна точка Y (deprecated - screen coords)
+    int dropoff_building_x = -1;   // Будівля для здачі X (deprecated - screen coords)
+    int dropoff_building_y = -1;   // Будівля для здачі Y (deprecated - screen coords)
+    
+    // NEW: Grid-based resource assignment
+    GridCoords assigned_resource_position;  // Призначена ресурсна точка (grid coords)
+    GridCoords assigned_dropoff_position;   // Будівля для здачі (grid coords)
+    bool has_assigned_resource;             // Чи є призначений ресурс
     
     // Бойові параметри
     int attack_damage = 0;         // Урон атаки
@@ -75,6 +80,9 @@ struct Unit {
         is_ai_controlled = aiControlled;
         ai_timer = 0.0f;
         useDebugRendering = true; // За замовчуванням використовуємо debug
+        has_assigned_resource = false; // NEW: Ініціалізація
+        assigned_resource_position = GridCoords(-1, -1); // NEW
+        assigned_dropoff_position = GridCoords(-1, -1); // NEW
         
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
@@ -276,6 +284,12 @@ struct Unit {
             return;
         }
         
+        // ВАЖЛИВО: Скасувати цикл збору при новій команді руху
+        if (has_assigned_resource) {
+            clearResourceAssignment();
+            printf("[MOVETO] Clearing resource assignment due to new movement command\n");
+        }
+        
         // ВАЖЛИВО: Не перевіряємо колізії тут, бо будівлі займають багато клітинок
         // Pathfinding система має обходити будівлі
         
@@ -420,16 +434,34 @@ struct Unit {
     
     // Призначити ресурсну точку для збору
     void assignResource(GridCoords resourcePos, GridCoords buildingPos) {
-        // Конвертуємо в screen coords для compatibility з існуючим кодом
+        // NEW: Зберігаємо grid coordinates
+        assigned_resource_position = resourcePos;
+        assigned_dropoff_position = buildingPos;
+        has_assigned_resource = true;
+        
+        // COMPATIBILITY: Конвертуємо в screen coords для старого коду
         ScreenCoords resScreen = CoordinateConverter::gridToScreen(resourcePos);
         ScreenCoords buildScreen = CoordinateConverter::gridToScreen(buildingPos);
         assigned_resource_x = (int)resScreen.x;
         assigned_resource_y = (int)resScreen.y;
         dropoff_building_x = (int)buildScreen.x;
         dropoff_building_y = (int)buildScreen.y;
+        
         moveTo(resourcePos);
         printf("Unit assigned: resource(%d,%d) building(%d,%d)\n", 
                resourcePos.row, resourcePos.col, buildingPos.row, buildingPos.col);
+    }
+    
+    // NEW: Очистити призначення ресурсу
+    void clearResourceAssignment() {
+        has_assigned_resource = false;
+        assigned_resource_position = GridCoords(-1, -1);
+        assigned_dropoff_position = GridCoords(-1, -1);
+        // COMPATIBILITY: Очищаємо старі поля
+        assigned_resource_x = -1;
+        assigned_resource_y = -1;
+        dropoff_building_x = -1;
+        dropoff_building_y = -1;
     }
     
     // COMPATIBILITY: Призначити ресурсну точку (screen coordinates - старий API)
@@ -445,7 +477,7 @@ struct Unit {
     
     // Перевірити, чи призначена ресурсна точка
     bool hasAssignedResource() const {
-        return assigned_resource_x != -1 && assigned_resource_y != -1;
+        return has_assigned_resource;
     }
     
     // Почати збір ресурсів
