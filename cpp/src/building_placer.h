@@ -30,19 +30,19 @@ public:
     bool placeBuilding(Building& building, int row, int col, int buildingIndex = -1) {
         // Перевірка валідності координат
         if (!map || !map->isValidCoord(row, col)) {
-            printf("[BuildingPlacer] Invalid tile coordinates: (%d, %d)\n", row, col);
+            LOG_BUILDING("[BuildingPlacer] Invalid tile coordinates: (%d, %d)\n", row, col);
             return false;
         }
         
         // Перевірка чи тайл прохідний
         if (!map->isPassable(row, col)) {
-            printf("[BuildingPlacer] Tile (%d, %d) is not passable\n", row, col);
+            LOG_BUILDING("[BuildingPlacer] Tile (%d, %d) is not passable\n", row, col);
             return false;
         }
         
         // Перевірка чи тайл вільний
         if (!isTileFree(row, col)) {
-            printf("[BuildingPlacer] Tile (%d, %d) is already occupied\n", row, col);
+            LOG_BUILDING("[BuildingPlacer] Tile (%d, %d) is already occupied\n", row, col);
             return false;
         }
         
@@ -66,7 +66,7 @@ public:
             const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(buildingGrid.row, buildingGrid.col, true);
         }
         
-        printf("[BuildingPlacer] Building placed at tile (%d, %d), screen (%d, %d)\n", 
+        LOG_BUILDING("[BuildingPlacer] Building placed at tile (%d, %d), screen (%d, %d)\n", 
                row, col, building.x, building.y);
         
         return true;
@@ -84,7 +84,7 @@ public:
             const_cast<NavigationGrid&>(pathfinding->getGrid()).markObstacle(buildingGrid.row, buildingGrid.col, false);
         }
         
-        printf("[BuildingPlacer] Building removed from tile (%d, %d)\n", 
+        LOG_BUILDING("[BuildingPlacer] Building removed from tile (%d, %d)\n", 
                building.tile_row, building.tile_col);
     }
     
