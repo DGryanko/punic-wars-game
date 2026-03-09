@@ -14,6 +14,8 @@
 #include "tilemap/tilemap_generator.h"
 #include "tilemap/coordinates.h"
 #include "render_queue.h"
+#include "game_constants.h"
+#include "debug_logger.h"
 #include <vector>
 #include <cmath>
 #include <ctime>
@@ -49,8 +51,8 @@ struct AudioSettings {
 // Налаштування відображення
 struct DisplaySettings {
     bool isWindowedFullscreen = false;
-    int windowWidth = 1434;
-    int windowHeight = 1075;
+    int windowWidth = GameConstants::UI::WINDOW_WIDTH;
+    int windowHeight = GameConstants::UI::WINDOW_HEIGHT;
     int savedX = 0;
     int savedY = 0;
 };
@@ -63,12 +65,12 @@ GameState currentState = MENU;
 GameState returnFromSettings = MENU;  // Куди повертатись з налаштувань
 RenderTexture2D gameSnapshot = {0};  // Знімок гри для фону паузи
 Faction playerFaction = ROME; // Фракція гравця
-int rome_food = 200;
-int rome_money = 100;
+int rome_food = GameConstants::StartingResources::ROME_FOOD;
+int rome_money = GameConstants::StartingResources::ROME_MONEY;
 int rome_food_reserved = 0;  // Зарезервовані ресурси
 int rome_money_reserved = 0;
-int carth_food = 150;
-int carth_money = 200;
+int carth_food = GameConstants::StartingResources::CARTHAGE_FOOD;
+int carth_money = GameConstants::StartingResources::CARTHAGE_MONEY;
 int carth_food_reserved = 0;
 int carth_money_reserved = 0;
 
@@ -349,7 +351,7 @@ void ToggleWindowedFullscreen() {
         SetWindowSize(monitorWidth, monitorHeight);
         
         displaySettings.isWindowedFullscreen = true;
-        printf("[DISPLAY] Switched to windowed fullscreen: %dx%d\n", monitorWidth, monitorHeight);
+        LOG_BUILDING("[DISPLAY] Switched to windowed fullscreen: %dx%d\n", monitorWidth, monitorHeight);
     } else {
         // Повертаємось у віконний режим
         ClearWindowState(FLAG_WINDOW_UNDECORATED);
@@ -357,7 +359,7 @@ void ToggleWindowedFullscreen() {
         SetWindowPosition(displaySettings.savedX, displaySettings.savedY);
         
         displaySettings.isWindowedFullscreen = false;
-        printf("[DISPLAY] Switched to windowed mode: %dx%d\n", displaySettings.windowWidth, displaySettings.windowHeight);
+        LOG_BUILDING("[DISPLAY] Switched to windowed mode: %dx%d\n", displaySettings.windowWidth, displaySettings.windowHeight);
     }
 }
 
@@ -441,42 +443,42 @@ int findUnitAtGrid(GridCoords pos) {
 
 // Знайти будівлю за grid координатами
 int findBuildingAtGrid(GridCoords pos) {
-    printf("[FIND] Looking for building at grid (%d, %d), player faction: %d\n", 
-           pos.row, pos.col, playerFaction);
-    printf("[FIND] Total buildings: %d\n", (int)buildings.size());
+    LOG_FIND("[FIND] Looking for building at grid (%d, %d), player faction: %d\n", 
+             pos.row, pos.col, playerFaction);
+    LOG_FIND("[FIND] Total buildings: %d\n", (int)buildings.size());
     
     for (int i = 0; i < buildings.size(); i++) {
-        printf("[FIND] Building %d: %s, faction: %d, position: (%d, %d), footprint: (%d, %d)\n",
-               i, buildings[i].name.c_str(), buildings[i].faction,
-               buildings[i].position.row, buildings[i].position.col,
-               buildings[i].footprint.row, buildings[i].footprint.col);
+        LOG_FIND("[FIND] Building %d: %s, faction: %d, position: (%d, %d), footprint: (%d, %d)\n",
+                 i, buildings[i].name.c_str(), buildings[i].faction,
+                 buildings[i].position.row, buildings[i].position.col,
+                 buildings[i].footprint.row, buildings[i].footprint.col);
         
         if (buildings[i].faction == playerFaction) {
             if (buildings[i].occupiesGridCell(pos)) {
-                printf("[FIND] Found matching building at index %d\n", i);
+                LOG_FIND("[FIND] Found matching building at index %d\n", i);
                 return i;
             }
         }
     }
-    printf("[FIND] No building found\n");
+    LOG_FIND("[FIND] No building found\n");
     return -1;
 }
 
 // Альтернативний метод: шукати будівлю по світовим координатам (враховує текстуру)
 int findBuildingAtWorldPos(Vector2 worldPos) {
-    printf("[FIND_WORLD] Looking for building at world (%.1f, %.1f), player faction: %d\n", 
-           worldPos.x, worldPos.y, playerFaction);
+    LOG_FIND("[FIND_WORLD] Looking for building at world (%.1f, %.1f), player faction: %d\n", 
+             worldPos.x, worldPos.y, playerFaction);
     
     for (int i = 0; i < buildings.size(); i++) {
         if (buildings[i].faction == playerFaction) {
             // Використовуємо isClicked() замість getRect() для точної перевірки ромба
             if (buildings[i].isClicked(worldPos)) {
-                printf("[FIND_WORLD] Found matching building at index %d\n", i);
+                LOG_FIND("[FIND_WORLD] Found matching building at index %d\n", i);
                 return i;
             }
         }
     }
-    printf("[FIND_WORLD] No building found\n");
+    LOG_FIND("[FIND_WORLD] No building found\n");
     return -1;
 }
 
@@ -645,7 +647,7 @@ void ProcessResourceHarvesting() {
             if (!resourceExists) {
                 unit.clearResourceAssignment();
                 unit.stopHarvesting();
-                printf("[HARVEST] Resource depleted, stopping cycle\n");
+                LOG_BUILDING("[HARVEST] Resource depleted, stopping cycle\n");
                 continue;
             }
             
@@ -673,17 +675,17 @@ void ProcessResourceHarvesting() {
                         carth_money += gold;
                     }
                     
-                    printf("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
+                    LOG_BUILDING("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
                            food, gold, rome_food, rome_money);
                     
                     // Повернутися до ресурсу
                     unit.moveTo(resourcePos);
-                    printf("[RETURN] Returning to resource at grid(%d,%d)\n", resourcePos.row, resourcePos.col);
+                    LOG_BUILDING("[RETURN] Returning to resource at grid(%d,%d)\n", resourcePos.row, resourcePos.col);
                 } else {
                     // Рухаємося до будівлі здачі
                     if (!unit.is_moving || !(unit.target_position == dropoffPos)) {
                         unit.moveTo(dropoffPos);
-                        printf("[MOVE_TO_DROPOFF] Moving to dropoff at grid(%d,%d), distance=%.1f\n", 
+                        LOG_BUILDING("[MOVE_TO_DROPOFF] Moving to dropoff at grid(%d,%d), distance=%.1f\n", 
                                dropoffPos.row, dropoffPos.col, distToDropoff);
                     }
                 }
@@ -714,7 +716,7 @@ void ProcessResourceHarvesting() {
                         // Логуємо тільки кожні 30 кадрів
                         static int harvestLogCounter = 0;
                         if (++harvestLogCounter % 30 == 0) {
-                            printf("[HARVEST] Slave harvesting. Carrying: %d/%d\n", 
+                            LOG_BUILDING("[HARVEST] Slave harvesting. Carrying: %d/%d\n", 
                                    unit.carrying_food + unit.carrying_gold, unit.max_carry_capacity);
                         }
                     }
@@ -722,7 +724,7 @@ void ProcessResourceHarvesting() {
                     // Рухаємося до ресурсу
                     if (!unit.is_moving || !(unit.target_position == resourcePos)) {
                         unit.moveTo(resourcePos);
-                        printf("[MOVE_TO_RESOURCE] Moving to resource at grid(%d,%d), distance=%.1f\n", 
+                        LOG_BUILDING("[MOVE_TO_RESOURCE] Moving to resource at grid(%d,%d), distance=%.1f\n", 
                                resourcePos.row, resourcePos.col, distToResource);
                     }
                 }
@@ -762,8 +764,8 @@ void InitBuildings() {
             (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
             mapCamera.target = {(float)building.x, (float)building.y};
             mapCamera.zoom = 1.5f;  // Максимальний зум на HQ
-            printf("[CAMERA] Focused on player HQ at (%d, %d) with zoom %.1f\n", 
-                   building.x, building.y, mapCamera.zoom);
+            LOG_SPAWN("[CAMERA] Focused on player HQ at (%d, %d) with zoom %.1f\n", 
+                      building.x, building.y, mapCamera.zoom);
             break;
         }
     }
@@ -771,7 +773,7 @@ void InitBuildings() {
     // Оновлюємо pathfinding grid з новими будівлями
     pathfindingManager.updateGrid(buildings);
     
-    printf("[BUILDINGS] Initialization complete: %d buildings spawned\n", (int)buildings.size());
+    LOG_BUILDING("[BUILDINGS] Initialization complete: %d buildings spawned\n", (int)buildings.size());
 }
 
 // Ініціалізація ресурсних точок
@@ -783,7 +785,7 @@ void InitResources() {
     const int NUM_GOLD_SOURCES = 6;  // 6 джерел золота
     const int MAX_ATTEMPTS = 100;    // Максимум спроб знайти вільне місце
     
-    printf("[RESOURCES] Spawning resource points...\n");
+    LOG_SPAWN("[RESOURCES] Spawning resource points...\n");
     
     // Спавн джерел їжі
     for (int i = 0; i < NUM_FOOD_SOURCES; i++) {
@@ -809,14 +811,14 @@ void InitResources() {
                     food.init(FOOD_SOURCE, GridCoords(row, col), 500 + rand() % 500); // 500-1000 їжі
                     resources.push_back(food);
                     placed = true;
-                    printf("[RESOURCES] Food source spawned at (%d, %d) with %d amount\n", 
-                           row, col, food.amount);
+                    LOG_SPAWN("[RESOURCES] Food source spawned at (%d, %d) with %d amount\n", 
+                              row, col, food.amount);
                 }
             }
         }
         
         if (!placed) {
-            printf("[RESOURCES] Warning: Could not place food source %d\n", i);
+            LOG_WARNING("[RESOURCES] Warning: Could not place food source %d\n", i);
         }
     }
     
@@ -844,18 +846,18 @@ void InitResources() {
                     gold.init(GOLD_SOURCE, GridCoords(row, col), 300 + rand() % 400); // 300-700 золота
                     resources.push_back(gold);
                     placed = true;
-                    printf("[RESOURCES] Gold source spawned at (%d, %d) with %d amount\n", 
-                           row, col, gold.amount);
+                    LOG_SPAWN("[RESOURCES] Gold source spawned at (%d, %d) with %d amount\n", 
+                              row, col, gold.amount);
                 }
             }
         }
         
         if (!placed) {
-            printf("[RESOURCES] Warning: Could not place gold source %d\n", i);
+            LOG_WARNING("[RESOURCES] Warning: Could not place gold source %d\n", i);
         }
     }
     
-    printf("[RESOURCES] Initialization complete: %d resources spawned\n", (int)resources.size());
+    LOG_SPAWN("[RESOURCES] Initialization complete: %d resources spawned\n", (int)resources.size());
 }
 
 // Створення юніта поруч з будівлею
@@ -890,7 +892,7 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     }
     
     if (!foundFree) {
-        printf("[SPAWN] Warning: Could not find free spawn position for unit!\n");
+        LOG_SPAWN("[SPAWN] Warning: Could not find free spawn position for unit!\n");
     }
     
     // Визначаємо, чи має юніт керуватися AI
@@ -901,7 +903,7 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     newUnit.init(unitType, building.faction, spawnGridPos, isAI);
     units.push_back(newUnit);
     
-    printf("[SPAWN] Unit spawned at grid(%d, %d) screen(%d, %d)\n", 
+    LOG_SPAWN("[SPAWN] Unit spawned at grid(%d, %d) screen(%d, %d)\n", 
            spawnGridPos.row, spawnGridPos.col, spawnX, spawnY);
 }
 
@@ -1393,7 +1395,7 @@ void HandleClicks() {
                     // Оновлюємо панель будівництва для рабів
                     if (slaveBuildPanel && units[i].unit_type == "slave") {
                         slaveBuildPanel->setSelectedUnit(i);
-                        printf("[CLICK] Updated slave build panel\n");
+                        LOG_CLICK("[CLICK] Updated slave build panel\n");
                     }
                     break;
                 }
@@ -1401,8 +1403,8 @@ void HandleClicks() {
             
             // Якщо не знайшли юніт, перевіряємо будівлі
             if (!foundUnit) {
-                printf("[CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n", 
-                       mousePos.x, mousePos.y, worldMousePos.x, worldMousePos.y, gridPos.row, gridPos.col);
+                LOG_CLICK("[CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n", 
+                          mousePos.x, mousePos.y, worldMousePos.x, worldMousePos.y, gridPos.row, gridPos.col);
                 
                 // Спочатку пробуємо знайти по світовим координатам (точніше для текстур)
                 int buildingIndex = findBuildingAtWorldPos(worldMousePos);
@@ -1412,20 +1414,20 @@ void HandleClicks() {
                     buildingIndex = findBuildingAtGrid(gridPos);
                 }
                 
-                printf("[CLICK] Found building index: %d\n", buildingIndex);
+                LOG_CLICK("[CLICK] Found building index: %d\n", buildingIndex);
                 
                 if (buildingIndex >= 0) {
                     buildings[buildingIndex].selected = true;
                     selectedBuildingIndex = buildingIndex;
-                    printf("[CLICK] Selected building: %s at grid (%d, %d)\n", 
-                           buildings[buildingIndex].name.c_str(),
-                           buildings[buildingIndex].position.row,
-                           buildings[buildingIndex].position.col);
+                    LOG_CLICK("[CLICK] Selected building: %s at grid (%d, %d)\n", 
+                              buildings[buildingIndex].name.c_str(),
+                              buildings[buildingIndex].position.row,
+                              buildings[buildingIndex].position.col);
                     
                     // Оновлюємо панель замовлення
                     if (unitOrderPanel) {
                         unitOrderPanel->setSelectedBuilding(buildingIndex);
-                        printf("[CLICK] Updated unit order panel\n");
+                        LOG_CLICK("[CLICK] Updated unit order panel\n");
                     }
                 }
             }
@@ -1476,7 +1478,7 @@ void HandleClicks() {
             ScreenCoords screenPos = {worldMousePos.x, worldMousePos.y};
             GridCoords gridPos = CoordinateConverter::screenToGrid(screenPos);
             
-            printf("[RIGHT_CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n",
+            LOG_CLICK("[RIGHT_CLICK] Mouse at screen (%.1f, %.1f) -> world (%.1f, %.1f) -> grid (%d, %d)\n",
                    mousePos.x, mousePos.y, worldMousePos.x, worldMousePos.y, gridPos.row, gridPos.col);
             
             // Перевіряємо клік по ворожих юнітах для атаки (використовуємо світові координати)
@@ -1555,7 +1557,7 @@ void HandleClicks() {
                 if (!foundResource) {
                     // Перевіряємо чи ціль не зайнята будівлею або шлях не блокований
                     if (isPathBlockedByBuilding(units[0].getGridPosition(), gridPos)) {
-                        printf("[MOVE] Cannot move to grid(%d,%d) - blocked by building\n", 
+                        LOG_CLICK("[MOVE] Cannot move to grid(%d,%d) - blocked by building\n", 
                                gridPos.row, gridPos.col);
                     } else {
                         // Рухаємо юніти до grid координат
@@ -1571,7 +1573,7 @@ void HandleClicks() {
                                     units[i].assigned_resource_y = -1;
                                 }
                                 
-                                printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
+                                LOG_CLICK("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
                             }
                         }
                     }
@@ -1994,9 +1996,9 @@ int main() {
     // Завантаження фону меню паузи
     pauseBackground = LoadTexture("assets/Pause_background.png");
     if (pauseBackground.id > 0) {
-        printf("[TEXTURE] Pause background loaded: %dx%d\n", pauseBackground.width, pauseBackground.height);
+        LOG_TEXTURE("[TEXTURE] Pause background loaded: %dx%d\n", pauseBackground.width, pauseBackground.height);
     } else {
-        printf("[TEXTURE] Warning: Pause background not loaded!\n");
+        LOG_TEXTURE("[TEXTURE] Warning: Pause background not loaded!\n");
     }
     
     // Завантаження загальної текстури фону (SVG не підтримується, використаємо PNG якщо є)
@@ -2006,27 +2008,27 @@ int main() {
         Image fallbackImg = GenImageColor(256, 256, {40, 35, 30, 255});
         backgroundTexture = LoadTextureFromImage(fallbackImg);
         UnloadImage(fallbackImg);
-        printf("[TEXTURE] Using fallback background texture\n");
+        LOG_TEXTURE("[TEXTURE] Using fallback background texture\n");
     } else {
-        printf("[TEXTURE] Background texture loaded: %dx%d\n", backgroundTexture.width, backgroundTexture.height);
+        LOG_TEXTURE("[TEXTURE] Background texture loaded: %dx%d\n", backgroundTexture.width, backgroundTexture.height);
     }
     
     // Завантаження логотипу
     gameLogo = LoadTexture("assets/sprites/Logo.png");
     if (gameLogo.id > 0) {
         logoLoaded = true;
-        printf("[TEXTURE] Logo loaded: %dx%d\n", gameLogo.width, gameLogo.height);
+        LOG_TEXTURE("[TEXTURE] Logo loaded: %dx%d\n", gameLogo.width, gameLogo.height);
     } else {
-        printf("[TEXTURE] Warning: Logo not loaded!\n");
+        LOG_TEXTURE("[TEXTURE] Warning: Logo not loaded!\n");
     }
     
     // Завантаження кастомного шрифту
     customFont = LoadFontEx("assets/fonts/GameFont.ttf", 48, 0, 0);
     if (customFont.texture.id > 0) {
         fontLoaded = true;
-        printf("[FONT] Custom font loaded successfully\n");
+        LOG_TEXTURE("[FONT] Custom font loaded successfully\n");
     } else {
-        printf("[FONT] Warning: Custom font not loaded, using default\n");
+        LOG_TEXTURE("[FONT] Warning: Custom font not loaded, using default\n");
     }
     
     // Завантаження текстур UI
@@ -2041,7 +2043,7 @@ int main() {
     DynamicButton::LoadTextures();
     
     // Завантаження текстур будівель
-    printf("[TEXTURE] Loading building textures...\n");
+    LOG_TEXTURE("[TEXTURE] Loading building textures...\n");
     BuildingTextureManager::getInstance().loadAllTextures();
     
     // Перевірка завантаження текстур (виводимо в файл для дебагу)
@@ -2067,9 +2069,9 @@ int main() {
     // Завантаження тайлсету
     if (FileExists("assets/isometric_tileset.png")) {
         mapRenderer->loadTileset("assets/isometric_tileset.png");
-        printf("[TILEMAP] Tileset loaded successfully\n");
+        LOG_BUILDING("[TILEMAP] Tileset loaded successfully\n");
     } else {
-        printf("[TILEMAP] Warning: Tileset not found, using debug rendering\n");
+        LOG_BUILDING("[TILEMAP] Warning: Tileset not found, using debug rendering\n");
     }
     
     // Налаштування камери для карти (початкова позиція - центр карти)
@@ -2084,7 +2086,7 @@ int main() {
     mapCamera.zoom = 0.5f;  // Зменшуємо зум щоб бачити більше карти
     mapRenderer->setCamera(mapCamera);
     
-    printf("[TILEMAP] Map generated: %dx%d, %.1f%% passable\n", 
+    LOG_BUILDING("[TILEMAP] Map generated: %dx%d, %.1f%% passable\n", 
            gameMap->getWidth(), gameMap->getHeight(), 
            gameMap->getPassablePercentage() * 100.0f);
     
@@ -2098,11 +2100,11 @@ int main() {
     resourceDisplay = new ResourceDisplay();
     resourceDisplay->init(resourcePanel, playerFaction);
     
-    printf("[UI] UI systems initialized\n");
+    LOG_BUILDING("[UI] UI systems initialized\n");
     
     // Створюємо RenderTexture для знімку гри
     gameSnapshot = LoadRenderTexture(screenWidth, screenHeight);
-    printf("[UI] Game snapshot texture created: %dx%d\n", screenWidth, screenHeight);
+    LOG_BUILDING("[UI] Game snapshot texture created: %dx%d\n", screenWidth, screenHeight);
     
     // Перевірка завантаження
     if (menuMusic.frameCount > 0 && ambientMusic[0].frameCount > 0 && 
