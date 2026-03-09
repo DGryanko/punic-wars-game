@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include "tilemap/coordinates.h"
 #include "isometric_sprite.h"
+#include "debug_logger.h"
 #include <string>
 #include <vector>
 #include <cmath>
@@ -419,8 +420,8 @@ struct Building {
         bool result = normalized <= 1.0f;
         
         if (result) {
-            printf("[isClicked] HIT! Building '%s' at grid(%d,%d), screen(%.1f,%.1f), mouse(%.1f,%.1f), normalized=%.2f\n",
-                   name.c_str(), position.row, position.col, screenPos.x, screenPos.y, mousePos.x, mousePos.y, normalized);
+            LOG_CLICK("[isClicked] HIT! Building '%s' at grid(%d,%d), screen(%.1f,%.1f), mouse(%.1f,%.1f), normalized=%.2f\n",
+                      name.c_str(), position.row, position.col, screenPos.x, screenPos.y, mousePos.x, mousePos.y, normalized);
         }
         
         return result;
