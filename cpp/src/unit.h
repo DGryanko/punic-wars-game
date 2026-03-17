@@ -15,6 +15,7 @@ struct Unit {
     // Для плавної інтерполяції між тайлами
     float interpolation_progress; // 0.0 - 1.0
     ScreenCoords current_screen_pos; // Поточна екранна позиція для плавного руху
+    ScreenCoords exact_target_screen; // Точна екранна ціль (не прив'язана до grid)
     
     // COMPATIBILITY LAYER: Публічні змінні для старого коду
     // Ці змінні автоматично синхронізуються з grid координатами
@@ -76,6 +77,7 @@ struct Unit {
         target_position = startPos;
         interpolation_progress = 1.0f; // Початково не рухається
         current_screen_pos = CoordinateConverter::gridToScreen(position);
+        exact_target_screen = current_screen_pos;
         is_moving = false;
         is_ai_controlled = aiControlled;
         ai_timer = 0.0f;
@@ -175,7 +177,7 @@ struct Unit {
         // Рух між grid позиціями з постійною швидкістю
         if (is_moving && !is_attacking) {
             if (!(position == target_position)) {
-                // Рухаємося з постійною швидкістю в пікселях за секунду
+                // Рухаємося до поточного waypoint
                 ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
                 
                 float dx = targetScreen.x - current_screen_pos.x;
@@ -190,7 +192,6 @@ struct Unit {
                         position = target_position;
                         current_screen_pos = targetScreen;
                         
-                        // Переходимо до наступного waypoint якщо є шлях
                         if (hasPath()) {
                             currentWaypointIndex++;
                             if (currentWaypointIndex < (int)path.size()) {
@@ -199,10 +200,19 @@ struct Unit {
                                 target_position = nextWp;
                                 syncScreenCoords();
                             } else {
-                                // Шлях завершено
+                                // Шлях завершено — рухаємося до точної кінцевої точки
                                 path.clear();
                                 currentWaypointIndex = 0;
-                                is_moving = false;
+                                float edx = exact_target_screen.x - current_screen_pos.x;
+                                float edy = exact_target_screen.y - current_screen_pos.y;
+                                if (sqrt(edx*edx + edy*edy) > 2.0f) {
+                                    // Ще не дійшли до точної цілі — продовжуємо рух
+                                    current_screen_pos.x += edx * (moveDistance / sqrt(edx*edx + edy*edy));
+                                    current_screen_pos.y += edy * (moveDistance / sqrt(edx*edx + edy*edy));
+                                } else {
+                                    current_screen_pos = exact_target_screen;
+                                    is_moving = false;
+                                }
                             }
                         } else {
                             is_moving = false;
@@ -233,7 +243,7 @@ struct Unit {
                     }
                 }
             } else {
-                // Вже на target — переходимо до наступного waypoint
+                // Вже на grid target — переходимо до наступного waypoint
                 if (hasPath()) {
                     currentWaypointIndex++;
                     if (currentWaypointIndex < (int)path.size()) {
@@ -244,7 +254,18 @@ struct Unit {
                     } else {
                         path.clear();
                         currentWaypointIndex = 0;
-                        is_moving = false;
+                        // Доходимо до точної кінцевої точки
+                        float edx = exact_target_screen.x - current_screen_pos.x;
+                        float edy = exact_target_screen.y - current_screen_pos.y;
+                        if (sqrt(edx*edx + edy*edy) > 2.0f) {
+                            float moveDistance = speed * deltaTime * 100.0f;
+                            float dist = sqrt(edx*edx + edy*edy);
+                            current_screen_pos.x += edx * (moveDistance / dist);
+                            current_screen_pos.y += edy * (moveDistance / dist);
+                        } else {
+                            current_screen_pos = exact_target_screen;
+                            is_moving = false;
+                        }
                     }
                 } else {
                     is_moving = false;
@@ -350,10 +371,17 @@ struct Unit {
         currentWaypointIndex = 0;
         is_moving = true;
         is_harvesting = false;
-        // Перший waypoint стає target_position
+        // Перший waypoint стає target_position (grid для collision)
         GridCoords firstWp = CoordinateConverter::screenToGrid(ScreenCoords(path[0].x, path[0].y));
         target_position = firstWp;
+        // Точна screen-ціль — остання точка шляху
+        exact_target_screen = ScreenCoords(path.back().x, path.back().y);
         syncScreenCoords();
+    }
+    
+    // Встановити точну screen-ціль (без прив'язки до grid)
+    void setExactTarget(ScreenCoords screenTarget) {
+        exact_target_screen = screenTarget;
     }
     
     // Перевірити чи є шлях

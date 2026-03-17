@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "building.h"
 #include "unit.h"
+#include "resource.h"
 #include "tilemap/coordinates.h"
 #include "pathfinding.h"
 #include <vector>
@@ -20,16 +21,22 @@ extern const int QUESTORIUM_RESOURCE_CAP;
 class PathfindingManager;
 extern PathfindingManager pathfindingManager;
 
+// Оголошення moveUnitWithPath та moveUnitWithPathToScreen з main.cpp
+extern void moveUnitWithPath(Unit& unit, GridCoords targetPos);
+extern void moveUnitWithPathToScreen(Unit& unit, ScreenCoords goalScreen);
+
+// Зовнішній список ресурсів
+extern std::vector<ResourcePoint> resources;
+
 struct BuildingCost { int food; int money; };
 
 inline BuildingCost getBuildingCost(BuildingType type) {
     if (type == QUESTORIUM_ROME)    return {20, 30};
-    if (type == BARRACKS_ROME)      return {30, 50};  // Контуберній (Рим)
-    if (type == BARRACKS_CARTHAGE)  return {30, 50};  // Лівійська палатка (Карфаген)
+    if (type == BARRACKS_ROME)      return {30, 50};
+    if (type == BARRACKS_CARTHAGE)  return {30, 50};
     return {0, 0};
 }
 
-// Повертає тип казарми для фракції
 inline BuildingType getBarracksType(Faction f) {
     return (f == ROME) ? BARRACKS_ROME : BARRACKS_CARTHAGE;
 }
@@ -42,14 +49,18 @@ private:
     Faction playerFaction;
 
     Rectangle panelRect;
-    Rectangle storageButton;   // Квесторій / склад
-    Rectangle barracksButton;  // Казарма
+    Rectangle storageButton;
+    Rectangle barracksButton;
+    Rectangle harvestButton;   // Зібрати ресурс
+    Rectangle dropoffButton;   // Скинути ресурс
 
 public:
     SlaveBuildPanel() : selectedUnitIndex(-1), units(nullptr), buildings(nullptr), playerFaction(ROME) {
-        panelRect      = {10, 950, 300, 100};
-        storageButton  = {20,  985,  50,  50};
-        barracksButton = {80,  985,  50,  50};
+        panelRect      = {10, 940, 380, 110};
+        storageButton  = {20,  975,  50,  50};
+        barracksButton = {80,  975,  50,  50};
+        harvestButton  = {160, 975,  90,  50};
+        dropoffButton  = {260, 975,  90,  50};
     }
 
     void init(std::vector<Unit>* u, std::vector<Building>* b, Faction faction) {
@@ -71,9 +82,11 @@ public:
         DrawRectangleRec(panelRect, {0, 0, 0, 200});
         DrawRectangleLines((int)panelRect.x, (int)panelRect.y,
                            (int)panelRect.width, (int)panelRect.height, WHITE);
-        DrawText("Slave - Build", 20, 960, 16, WHITE);
+        DrawText("Slave", 20, 950, 16, WHITE);
         drawStorageButton();
         drawBarracksButton();
+        drawHarvestButton();
+        drawDropoffButton();
     }
 
     void handleClick(Vector2 mousePos) {
@@ -91,6 +104,16 @@ public:
             BuildingType bt = getBarracksType(playerFaction);
             if (canAffordBarracks()) spawnBuilding(bt);
             else printf("[SlaveBuildPanel] Cannot afford barracks\n");
+        }
+
+        if (CheckCollisionPointRec(mousePos, harvestButton) &&
+            IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            cmdHarvest();
+        }
+
+        if (CheckCollisionPointRec(mousePos, dropoffButton) &&
+            IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            cmdDropoff();
         }
     }
 
@@ -131,6 +154,95 @@ private:
         DrawText(label, (int)barracksButton.x + 5, (int)barracksButton.y + 10, 12, WHITE);
         DrawText(TextFormat("F:%d", c.food),  (int)barracksButton.x, (int)barracksButton.y + 52, 9, YELLOW);
         DrawText(TextFormat("M:%d", c.money), (int)barracksButton.x, (int)barracksButton.y + 63, 9, YELLOW);
+    }
+
+    void drawHarvestButton() const {
+        DrawRectangleRec(harvestButton, {0, 100, 0, 220});
+        DrawRectangleLines((int)harvestButton.x, (int)harvestButton.y,
+                           (int)harvestButton.width, (int)harvestButton.height, WHITE);
+        DrawText("Harvest", (int)harvestButton.x + 5, (int)harvestButton.y + 10, 12, WHITE);
+        DrawText("(3 tiles)", (int)harvestButton.x + 5, (int)harvestButton.y + 28, 10, LIGHTGRAY);
+    }
+
+    void drawDropoffButton() const {
+        DrawRectangleRec(dropoffButton, {100, 60, 0, 220});
+        DrawRectangleLines((int)dropoffButton.x, (int)dropoffButton.y,
+                           (int)dropoffButton.width, (int)dropoffButton.height, WHITE);
+        DrawText("Drop off", (int)dropoffButton.x + 5, (int)dropoffButton.y + 10, 12, WHITE);
+        DrawText("(nearest)", (int)dropoffButton.x + 5, (int)dropoffButton.y + 28, 10, LIGHTGRAY);
+    }
+
+    // Знайти найближчий ресурс в радіусі 3 тайлів від раба
+    void cmdHarvest() const {
+        if (selectedUnitIndex < 0 || !units) return;
+        Unit& slave = (*units)[selectedUnitIndex];
+        GridCoords slavePos = slave.getGridPosition();
+
+        const int HARVEST_RADIUS = 3;
+        ResourcePoint* nearest = nullptr;
+        float nearestDist = 999999.0f;
+
+        for (auto& res : resources) {
+            if (res.depleted) continue;
+            GridCoords rp = res.getGridPosition();
+            float dist = sqrt(pow((float)(slavePos.row - rp.row), 2) +
+                              pow((float)(slavePos.col - rp.col), 2));
+            if (dist <= HARVEST_RADIUS && dist < nearestDist) {
+                nearestDist = dist;
+                nearest = &res;
+            }
+        }
+
+        if (!nearest) {
+            printf("[SlaveBuildPanel] No resource within %d tiles\n", HARVEST_RADIUS);
+            return;
+        }
+
+        // Знаходимо найближчу будівлю здачі
+        GridCoords dropoffPos = findNearestDropoff(slavePos);
+        if (dropoffPos.row == -1) {
+            printf("[SlaveBuildPanel] No dropoff building found\n");
+            return;
+        }
+
+        slave.assignResource(nearest->getGridPosition(), dropoffPos);
+        printf("[SlaveBuildPanel] Slave sent to harvest at grid(%d,%d)\n",
+               nearest->getGridPosition().row, nearest->getGridPosition().col);
+    }
+
+    // Відправити раба до найближчої точки здачі
+    void cmdDropoff() const {
+        if (selectedUnitIndex < 0 || !units) return;
+        Unit& slave = (*units)[selectedUnitIndex];
+        GridCoords slavePos = slave.getGridPosition();
+
+        GridCoords dropoffPos = findNearestDropoff(slavePos);
+        if (dropoffPos.row == -1) {
+            printf("[SlaveBuildPanel] No dropoff building found\n");
+            return;
+        }
+
+        moveUnitWithPath(slave, dropoffPos);
+        printf("[SlaveBuildPanel] Slave sent to dropoff at grid(%d,%d)\n",
+               dropoffPos.row, dropoffPos.col);
+    }
+
+    // Знайти найближчу будівлю здачі ресурсів (HQ або Questorium)
+    GridCoords findNearestDropoff(GridCoords from) const {
+        GridCoords best = {-1, -1};
+        float bestDist = 999999.0f;
+        for (const auto& b : *buildings) {
+            if (b.faction != playerFaction) continue;
+            if (b.type != HQ_ROME && b.type != HQ_CARTHAGE && b.type != QUESTORIUM_ROME) continue;
+            GridCoords bp = b.getGridPosition();
+            float dist = sqrt(pow((float)(from.row - bp.row), 2) +
+                              pow((float)(from.col - bp.col), 2));
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = bp;
+            }
+        }
+        return best;
     }
 
     void spawnBuilding(BuildingType buildingType) const {
@@ -186,3 +298,5 @@ private:
 };
 
 #endif // SLAVE_BUILD_PANEL_H
+
+// (class SlaveBuildPanel defined above)

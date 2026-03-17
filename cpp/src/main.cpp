@@ -531,7 +531,7 @@ GridCoords findNearestWalkableTile(GridCoords target) {
     return target; // Fallback
 }
 
-// Рух юніта з A* pathfinding (обходить будівлі)
+// Рух юніта з A* pathfinding (обходить будівлі) — по grid координатах
 void moveUnitWithPath(Unit& unit, GridCoords targetPos) {
     ScreenCoords startScreen = unit.getScreenPosition();
     ScreenCoords goalScreen = CoordinateConverter::gridToScreen(targetPos);
@@ -546,8 +546,27 @@ void moveUnitWithPath(Unit& unit, GridCoords targetPos) {
     if (!path.empty()) {
         unit.setPath(path);
     } else {
-        // Fallback: пряма лінія якщо шлях не знайдено
         unit.moveTo(targetPos);
+    }
+}
+
+// Рух юніта з A* pathfinding — по точних world (screen) координатах
+void moveUnitWithPathToScreen(Unit& unit, ScreenCoords goalScreen) {
+    ScreenCoords startScreen = unit.getScreenPosition();
+    
+    AStarPathfinder pathfinder;
+    std::vector<Vector2> path = pathfinder.findPath(
+        {startScreen.x, startScreen.y},
+        {goalScreen.x, goalScreen.y},
+        pathfindingManager.getGrid()
+    );
+    
+    if (!path.empty()) {
+        unit.setPath(path);
+    } else {
+        // Fallback: конвертуємо в grid і рухаємо напряму
+        GridCoords gridPos = CoordinateConverter::screenToGrid(goalScreen);
+        unit.moveTo(gridPos);
     }
 }
 
@@ -1375,7 +1394,7 @@ void HandleClicks() {
     if (slaveBuildPanel && slaveBuildPanel->isVisible()) {
         slaveBuildPanel->handleClick(mousePos);
         // Якщо клік був на панелі, не обробляємо далі
-        Rectangle panelRect = {10, 950, 300, 100};
+        Rectangle panelRect = {10, 940, 380, 110};
         if (CheckCollisionPointRec(mousePos, panelRect)) {
             return;
         }
@@ -1574,18 +1593,26 @@ void HandleClicks() {
                     }
                 }
                 
-                // Якщо не клікнули по ресурсу або ворогу, звичайний рух до grid позиції
+                // Якщо не клікнули по ресурсу або ворогу, звичайний рух до точної позиції
                 if (!foundResource) {
                     // Знаходимо найближчий прохідний тайл (якщо клікнули на будівлю)
-                    GridCoords targetPos = findNearestWalkableTile(gridPos);
+                    GridCoords targetGrid = findNearestWalkableTile(gridPos);
                     
-                    // Рухаємо юніти до grid координат з pathfinding
+                    // Рухаємо юніти до точних world координат кліку (якщо тайл вільний)
+                    // або до найближчого вільного тайлу
+                    bool useExactPos = (targetGrid.row == gridPos.row && targetGrid.col == gridPos.col);
+                    
                     for (int i = 0; i < units.size(); i++) {
                         if (units[i].selected && units[i].faction == playerFaction) {
-                            units[i].moveToByPlayer(targetPos); // скасовує призначення ресурсу
-                            moveUnitWithPath(units[i], targetPos);
+                            units[i].moveToByPlayer(targetGrid);
                             units[i].target_unit_id = -1;
-                            printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, targetPos.row, targetPos.col);
+                            if (useExactPos) {
+                                // Рухаємо до точних world координат кліку
+                                moveUnitWithPathToScreen(units[i], {worldMousePos.x, worldMousePos.y});
+                            } else {
+                                moveUnitWithPath(units[i], targetGrid);
+                            }
+                            printf("[MOVE] Unit %d moving to world(%.1f,%.1f)\n", i, worldMousePos.x, worldMousePos.y);
                         }
                     }
                 }
@@ -1625,8 +1652,21 @@ void DrawGame() {
         mapCamera.target.x += cameraSpeed;
     }
     
-    // Керування камерою мишею (перетягування середньою кнопкою або правою)
-    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE) || IsMouseButtonDown(MOUSE_BUTTON_RIGHT)) {
+    // Edge scroll — скрол камери при підведенні миші до краю екрана
+    {
+        const float EDGE_ZONE = 20.0f;   // пікселів від краю
+        const float EDGE_SPEED = 400.0f * GetFrameTime();
+        Vector2 mp = GetMousePosition();
+        int sw = GetScreenWidth();
+        int sh = GetScreenHeight();
+        if (mp.x < EDGE_ZONE)        mapCamera.target.x -= EDGE_SPEED;
+        if (mp.x > sw - EDGE_ZONE)   mapCamera.target.x += EDGE_SPEED;
+        if (mp.y < EDGE_ZONE)        mapCamera.target.y -= EDGE_SPEED;
+        if (mp.y > sh - EDGE_ZONE)   mapCamera.target.y += EDGE_SPEED;
+    }
+    
+    // Керування камерою мишею (перетягування середньою кнопкою)
+    if (IsMouseButtonDown(MOUSE_BUTTON_MIDDLE)) {
         Vector2 delta = GetMouseDelta();
         mapCamera.target.x -= delta.x;
         mapCamera.target.y -= delta.y;
@@ -1755,20 +1795,20 @@ void DrawGame() {
                     float pixelDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
                                            pow(myScreen.y - bScreen.y, 2));
                     float currentTime = GetTime();
-                    // Атакуємо будівлю якщо в межах attack_range * 2
-                    if (pixelDist <= units[i].attack_range * 2.0f) {
-                        units[i].clearPath();
-                        units[i].is_moving = false;
+                    // Атакуємо будівлю якщо в межах attack_range * 5 (будівлі великі)
+                    const float BUILD_ATTACK_RANGE = units[i].attack_range * 5.0f;
+                    if (pixelDist <= BUILD_ATTACK_RANGE) {
+                        // НЕ виставляємо is_attacking=true щоб не блокувати рух
                         if (currentTime - units[i].last_attack_time >= units[i].attack_cooldown) {
                             buildings[nearestEnemyBuilding].takeDamage(units[i].attack_damage);
                             units[i].last_attack_time = currentTime;
-                            units[i].is_attacking = true;
                         }
                     } else {
-                        // Переслідуємо будівлю
+                        // Переслідуємо будівлю — йдемо до найближчого прохідного тайлу поруч
                         GridCoords bGrid = buildings[nearestEnemyBuilding].getGridPosition();
-                        if (!units[i].is_moving || !(units[i].target_position == bGrid)) {
-                            moveUnitWithPath(units[i], bGrid);
+                        GridCoords walkable = findNearestWalkableTile(bGrid);
+                        if (!units[i].is_moving || !(units[i].target_position == walkable)) {
+                            moveUnitWithPath(units[i], walkable);
                         }
                     }
                 }
