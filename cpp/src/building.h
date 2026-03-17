@@ -2,6 +2,7 @@
 #include "raylib.h"
 #include "tilemap/coordinates.h"
 #include "isometric_sprite.h"
+#include "debug_logger.h"
 #include <string>
 #include <vector>
 #include <cmath>

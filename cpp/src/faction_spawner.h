@@ -4,14 +4,16 @@
 #include "building_placer.h"
 #include "tilemap/tilemap.h"
 #include "building.h"
+#include "game_constants.h"
+#include "debug_logger.h"
 #include <vector>
 #include <cstdlib>
 #include <cmath>
 
 // Конфігурація спавну
 struct SpawnConfiguration {
-    int minDistanceBetweenHQs = 20;  // Мінімальна відстань між HQ
-    int maxSpawnAttempts = 100;      // Максимум спроб знайти позицію
+    int minDistanceBetweenHQs = GameConstants::Spawn::MIN_HQ_DISTANCE;
+    int maxSpawnAttempts = GameConstants::Spawn::MAX_SPAWN_ATTEMPTS;
 };
 
 // Система спавну головних наметів фракцій
@@ -40,23 +42,23 @@ public:
     // Спавн HQ обох фракцій
     void spawnFactionHQs() {
         if (!placer || !map || !buildings) {
-            printf("[FactionSpawner] Error: Not initialized!\n");
+            LOG_ERROR("[FactionSpawner] Error: Not initialized!\n");
             return;
         }
         
-        printf("[FactionSpawner] Spawning faction HQs...\n");
+        LOG_SPAWN("[FactionSpawner] Spawning faction HQs...\n");
         
         // Знайти позицію для Rome HQ
         GridCoords romePos = findRandomFreeTile();
         if (romePos.row == -1) {
-            printf("[FactionSpawner] Error: Cannot find free tile for Rome HQ, using fallback (5, 5)\n");
+            LOG_ERROR("[FactionSpawner] Error: Cannot find free tile for Rome HQ, using fallback (5, 5)\n");
             romePos = GridCoords(5, 5);
         }
         
         // Знайти позицію для Carthage HQ (з мінімальною відстанню)
         GridCoords carthagePos = findRandomFreeTileWithDistance(romePos, config.minDistanceBetweenHQs);
         if (carthagePos.row == -1) {
-            printf("[FactionSpawner] Error: Cannot find free tile for Carthage HQ with min distance, using fallback (45, 45)\n");
+            LOG_ERROR("[FactionSpawner] Error: Cannot find free tile for Carthage HQ with min distance, using fallback (45, 45)\n");
             carthagePos = GridCoords(45, 45);
         }
         
@@ -64,7 +66,7 @@ public:
         createHQ(ROME, romePos);
         createHQ(CARTHAGE, carthagePos);
         
-        printf("[FactionSpawner] HQs spawned successfully\n");
+        LOG_SPAWN("[FactionSpawner] HQs spawned successfully\n");
     }
     
 private:
@@ -128,9 +130,10 @@ private:
             attempts++;
             
             // Після 50 спроб зменшуємо мінімальну відстань на 50%
-            if (attempts == 50) {
+            if (attempts == GameConstants::Spawn::REDUCE_DISTANCE_AFTER) {
                 reducedMinDist = minDist / 2;
-                printf("[FactionSpawner] Reducing min distance to %d after 50 attempts\n", reducedMinDist);
+                LOG_SPAWN("[FactionSpawner] Reducing min distance to %d after %d attempts\n", 
+                          reducedMinDist, GameConstants::Spawn::REDUCE_DISTANCE_AFTER);
             }
         }
         
@@ -152,14 +155,14 @@ private:
         int buildingIndex = buildings->size();
         if (placer->placeBuilding(hq, position.row, position.col, buildingIndex)) {
             buildings->push_back(hq);
-            printf("[FactionSpawner] %s HQ spawned at tile (%d, %d) at world pos (%d, %d)\n", 
-                   (faction == ROME) ? "Rome" : "Carthage", 
-                   position.row, position.col,
-                   (*buildings)[buildingIndex].x, (*buildings)[buildingIndex].y);
+            LOG_SPAWN("[FactionSpawner] %s HQ spawned at tile (%d, %d) at world pos (%d, %d)\n", 
+                      (faction == ROME) ? "Rome" : "Carthage", 
+                      position.row, position.col,
+                      (*buildings)[buildingIndex].x, (*buildings)[buildingIndex].y);
         } else {
-            printf("[FactionSpawner] Error: Failed to place %s HQ at tile (%d, %d)\n", 
-                   (faction == ROME) ? "Rome" : "Carthage", 
-                   position.row, position.col);
+            LOG_ERROR("[FactionSpawner] Error: Failed to place %s HQ at tile (%d, %d)\n", 
+                      (faction == ROME) ? "Rome" : "Carthage", 
+                      position.row, position.col);
         }
     }
     
