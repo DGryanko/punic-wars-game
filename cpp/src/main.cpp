@@ -26,7 +26,9 @@ enum GameState {
     SETTINGS,
     FACTION_SELECT,
     PLAYING,
-    PAUSE_MENU,  // Нове: пауза в грі
+    PAUSE_MENU,
+    VICTORY_SCREEN,
+    DEFEAT_SCREEN,
     EXIT
 };
 
@@ -38,7 +40,8 @@ enum MusicState {
     MUSIC_BATTLE_CARTHAGE,// Бойова музика Карфагену
     MUSIC_SUSPENSE,       // Напруга (ворог атакує)
     MUSIC_PEACEFUL,       // Мирна (будівництво)
-    MUSIC_DEFEAT          // Поразка
+    MUSIC_DEFEAT,         // Поразка
+    MUSIC_VICTORY         // Перемога
 };
 
 // Налаштування звуку
@@ -59,6 +62,9 @@ struct DisplaySettings {
 
 AudioSettings audioSettings;
 DisplaySettings displaySettings;
+
+// Debug налаштування
+bool showDebugVisuals = false; // Показувати debug візуалізацію (кліки, шляхи)
 
 // Глобальні змінні
 GameState currentState = MENU;
@@ -90,6 +96,7 @@ Music battleMusicCarthage[2];   // 2 бойові треки Карфагену
 Music suspenseMusic[2];         // 2 треки напруги
 Music peacefulMusic[2];         // 2 мирні треки
 Music defeatMusic[2];           // 2 треки поразки
+Music victoryMusic;             // Трек перемоги Риму
 Music currentMusic;
 Music nextMusic;                // Наступний трек для crossfade
 MusicState currentMusicState = MUSIC_MENU;
@@ -98,6 +105,8 @@ Texture2D menuBackground;
 Texture2D factionBackground;
 Texture2D settingsBackground;
 Texture2D pauseBackground;    // Фон меню паузи
+Texture2D victoryBackground;  // Фон екрану перемоги
+Texture2D defeatBackground;   // Фон екрану поразки
 Texture2D backgroundTexture;  // Загальна текстура для фону
 bool audioInitialized = false;
 
@@ -203,6 +212,9 @@ void SwitchMusic(MusicState newState) {
         case MUSIC_DEFEAT:
             nextMusic = defeatMusic[randomTrack];
             break;
+        case MUSIC_VICTORY:
+            nextMusic = victoryMusic;
+            break;
     }
     
     // Починаємо crossfade
@@ -275,6 +287,9 @@ void UpdateGameMusic() {
             case MUSIC_DEFEAT:
                 currentMusic = defeatMusic[randomTrack];
                 break;
+            case MUSIC_VICTORY:
+                currentMusic = victoryMusic;
+                break;
             default:
                 break;
         }
@@ -319,6 +334,11 @@ void UpdateGameMusic() {
     }
     
     // Логіка перемикання музики за пріоритетами
+    // Не перемикаємо якщо грає музика перемоги або поразки
+    if (currentMusicState == MUSIC_VICTORY || currentMusicState == MUSIC_DEFEAT) {
+        return;
+    }
+
     if (enemyNearby && !isInCombat && currentMusicState != MUSIC_SUSPENSE) {
         // Пріоритет 5: Ворог поблизу але ще не б'ються
         SwitchMusic(MUSIC_SUSPENSE);
@@ -735,7 +755,7 @@ void ProcessResourceHarvesting() {
                     printf("[RETURN] Returning to resource at grid(%d,%d)\n", resourcePos.row, resourcePos.col);
                 } else {
                     // Рухаємося до будівлі здачі
-                    if (!unit.is_moving || !(unit.target_position == dropoffPos)) {
+                    if (!unit.is_moving || !(unit.final_destination == dropoffPos)) {
                         moveUnitWithPath(unit, dropoffPos);
                         printf("[MOVE_TO_DROPOFF] Moving to dropoff at grid(%d,%d), distance=%.1f\n", 
                                dropoffPos.row, dropoffPos.col, distToDropoff);
@@ -774,7 +794,7 @@ void ProcessResourceHarvesting() {
                     }
                 } else {
                     // Рухаємося до ресурсу
-                    if (!unit.is_moving || !(unit.target_position == resourcePos)) {
+                    if (!unit.is_moving || !(unit.final_destination == resourcePos)) {
                         moveUnitWithPath(unit, resourcePos);
                         printf("[MOVE_TO_RESOURCE] Moving to resource at grid(%d,%d), distance=%.1f\n", 
                                resourcePos.row, resourcePos.col, distToResource);
@@ -807,20 +827,8 @@ void InitBuildings() {
     }
     factionSpawner->init(buildingPlacer, gameMap, &buildings);
     
-    // Автоматичний спавн головних наметів фракцій
-    factionSpawner->spawnFactionHQs();
-    
-    // Фокусуємо камеру на HQ гравця з максимальним зумом
-    for (const auto& building : buildings) {
-        if (building.faction == playerFaction && 
-            (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
-            mapCamera.target = {(float)building.x, (float)building.y};
-            mapCamera.zoom = 1.5f;  // Максимальний зум на HQ
-            LOG_SPAWN("[CAMERA] Focused on player HQ at (%d, %d) with zoom %.1f\n", 
-                      building.x, building.y, mapCamera.zoom);
-            break;
-        }
-    }
+    // Спавн тільки ворожого HQ (гравець будує свій сам)
+    factionSpawner->spawnEnemyHQ(playerFaction);
     
     // Оновлюємо pathfinding grid з новими будівлями
     pathfindingManager.updateGrid(buildings);
@@ -1038,9 +1046,19 @@ void DrawSettings() {
     if (displaySettings.isWindowedFullscreen) {
         DrawRectangle(sliderX + 5, startY + spacing * 3 + 5, 20, 20, GREEN);
     }
-    
+
+    // Чекбокс debug візуалізації
+    DrawText("Debug visuals:", labelX, startY + spacing * 4, 20, WHITE);
+    Rectangle debugCheckRect = {(float)sliderX, startY + spacing * 4, 30, 30};
+    DrawRectangleRec(debugCheckRect, DARKGRAY);
+    DrawRectangleLines((int)debugCheckRect.x, (int)debugCheckRect.y, 30, 30, WHITE);
+    if (showDebugVisuals) {
+        DrawRectangle(sliderX + 5, (int)(startY + spacing * 4) + 5, 20, 20, ORANGE);
+    }
+    DrawText("(click markers, unit paths)", sliderX + 40, (int)(startY + spacing * 4) + 5, 16, LIGHTGRAY);
+
     // Кнопка назад відцентрована
-    DynamicButton backButton(0, startY + spacing * 4.5f, "BACK", 20);
+    DynamicButton backButton(0, startY + spacing * 5.5f, "BACK", 20);
     backButton.bounds.x = (screenW - backButton.bounds.width) / 2.0f;
     Vector2 mousePos = GetMousePosition();
     backButton.Update(mousePos);
@@ -1071,6 +1089,11 @@ void DrawSettings() {
     // Обробка чекбоксу повноекранного режиму
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, checkboxRect)) {
         ToggleWindowedFullscreen();
+    }
+
+    // Обробка чекбоксу debug візуалізації
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, debugCheckRect)) {
+        showDebugVisuals = !showDebugVisuals;
     }
     
     // Обробка кнопки назад
@@ -1175,6 +1198,123 @@ void DrawPauseMenu() {
     }
     
     // Малювання курсора
+    DrawCustomCursor();
+}
+
+// ─── Допоміжна функція: малює фон екрану (victory або defeat) ───────────────
+static void DrawEndScreenBackground(Texture2D& bg) {
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
+    if (bg.id > 0) {
+        float scale = (float)screenH / bg.height;
+        float drawWidth = bg.width * scale;
+        float offsetX = (screenW - drawWidth) / 2.0f;
+        DrawTexturePro(bg,
+            {0, 0, (float)bg.width, (float)bg.height},
+            {offsetX, 0, drawWidth, (float)screenH},
+            {0, 0}, 0.0f, WHITE);
+    } else {
+        ClearBackground({20, 15, 10, 255});
+    }
+}
+
+// ─── Екран перемоги ──────────────────────────────────────────────────────────
+void DrawVictoryScreen() {
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
+
+    DrawEndScreenBackground(victoryBackground);
+
+    // Заголовок
+    const char* title = "VICTORY!";
+    int titleSize = 64;
+    int titleW = MeasureText(title, titleSize);
+    DrawText(title, (screenW - titleW) / 2, (int)(screenH * 0.18f), titleSize, GOLD);
+
+    // Кнопки
+    float centerX = screenW / 2.0f;
+    float startY  = screenH * 0.38f;
+    float spacing = 110.0f;
+
+    DynamicButton newGameBtn(0, startY,              "START GAME",    24);
+    DynamicButton menuBtn   (0, startY + spacing,    "MAIN MENU",     24);
+    DynamicButton exitBtn   (0, startY + spacing * 2,"EXIT",          24);
+
+    newGameBtn.bounds.x = centerX - newGameBtn.bounds.width / 2.0f;
+    menuBtn.bounds.x    = centerX - menuBtn.bounds.width    / 2.0f;
+    exitBtn.bounds.x    = centerX - exitBtn.bounds.width    / 2.0f;
+
+    Vector2 mousePos = GetMousePosition();
+    newGameBtn.Update(mousePos);
+    menuBtn.Update(mousePos);
+    exitBtn.Update(mousePos);
+
+    newGameBtn.Draw();
+    menuBtn.Draw();
+    exitBtn.Draw();
+
+    if (newGameBtn.IsClicked()) {
+        currentState = FACTION_SELECT;
+        if (audioInitialized) SwitchMusic(MUSIC_MENU);
+    }
+    if (menuBtn.IsClicked()) {
+        currentState = MENU;
+        if (audioInitialized) SwitchMusic(MUSIC_MENU);
+    }
+    if (exitBtn.IsClicked()) {
+        currentState = EXIT;
+    }
+
+    DrawCustomCursor();
+}
+
+// ─── Екран поразки ───────────────────────────────────────────────────────────
+void DrawDefeatScreen() {
+    int screenW = GetScreenWidth();
+    int screenH = GetScreenHeight();
+
+    DrawEndScreenBackground(defeatBackground);
+
+    // Заголовок
+    const char* title = "DEFEAT";
+    int titleSize = 64;
+    int titleW = MeasureText(title, titleSize);
+    DrawText(title, (screenW - titleW) / 2, (int)(screenH * 0.18f), titleSize, RED);
+
+    // Кнопки
+    float centerX = screenW / 2.0f;
+    float startY  = screenH * 0.38f;
+    float spacing = 110.0f;
+
+    DynamicButton newGameBtn(0, startY,              "START GAME",    24);
+    DynamicButton menuBtn   (0, startY + spacing,    "MAIN MENU",     24);
+    DynamicButton exitBtn   (0, startY + spacing * 2,"EXIT",          24);
+
+    newGameBtn.bounds.x = centerX - newGameBtn.bounds.width / 2.0f;
+    menuBtn.bounds.x    = centerX - menuBtn.bounds.width    / 2.0f;
+    exitBtn.bounds.x    = centerX - exitBtn.bounds.width    / 2.0f;
+
+    Vector2 mousePos = GetMousePosition();
+    newGameBtn.Update(mousePos);
+    menuBtn.Update(mousePos);
+    exitBtn.Update(mousePos);
+
+    newGameBtn.Draw();
+    menuBtn.Draw();
+    exitBtn.Draw();
+
+    if (newGameBtn.IsClicked()) {
+        currentState = FACTION_SELECT;
+        if (audioInitialized) SwitchMusic(MUSIC_MENU);
+    }
+    if (menuBtn.IsClicked()) {
+        currentState = MENU;
+        if (audioInitialized) SwitchMusic(MUSIC_MENU);
+    }
+    if (exitBtn.IsClicked()) {
+        currentState = EXIT;
+    }
+
     DrawCustomCursor();
 }
 
@@ -1347,10 +1487,26 @@ void DrawFactionSelect() {
         InitBuildings();
         InitResources();
         units.clear();
-        // Запускаємо амбієнт музику для геймплею
-        if (audioInitialized) {
-            SwitchMusic(MUSIC_AMBIENT);
+        // Спавн раба на випадковій вільній позиції (як раніше HQ)
+        {
+            GridCoords spawnPos = {-1, -1};
+            for (int attempt = 0; attempt < 200 && spawnPos.row == -1; attempt++) {
+                int row = 5 + rand() % 70;
+                int col = 5 + rand() % 70;
+                if (pathfindingManager.getGrid().isWalkable(row, col)) {
+                    spawnPos = {row, col};
+                }
+            }
+            if (spawnPos.row == -1) spawnPos = {10, 10};
+            Unit slave;
+            slave.init("slave", playerFaction, spawnPos, false);
+            units.push_back(slave);
+            // Фокус камери на рабі
+            ScreenCoords sc = CoordinateConverter::gridToScreen(spawnPos);
+            mapCamera.target = {sc.x, sc.y};
+            mapCamera.zoom = 1.5f;
         }
+        if (audioInitialized) SwitchMusic(MUSIC_AMBIENT);
     }
     if (carthageButton.IsClicked()) {
         playerFaction = CARTHAGE;
@@ -1358,10 +1514,26 @@ void DrawFactionSelect() {
         InitBuildings();
         InitResources();
         units.clear();
-        // Запускаємо амбієнт музику для геймплею
-        if (audioInitialized) {
-            SwitchMusic(MUSIC_AMBIENT);
+        // Спавн раба на випадковій вільній позиції (як раніше HQ)
+        {
+            GridCoords spawnPos = {-1, -1};
+            for (int attempt = 0; attempt < 200 && spawnPos.row == -1; attempt++) {
+                int row = 5 + rand() % 70;
+                int col = 5 + rand() % 70;
+                if (pathfindingManager.getGrid().isWalkable(row, col)) {
+                    spawnPos = {row, col};
+                }
+            }
+            if (spawnPos.row == -1) spawnPos = {10, 10};
+            Unit slave;
+            slave.init("slave", playerFaction, spawnPos, false);
+            units.push_back(slave);
+            // Фокус камери на рабі
+            ScreenCoords sc = CoordinateConverter::gridToScreen(spawnPos);
+            mapCamera.target = {sc.x, sc.y};
+            mapCamera.zoom = 1.5f;
         }
+        if (audioInitialized) SwitchMusic(MUSIC_AMBIENT);
     }
     if (backButton.IsClicked()) {
         currentState = MENU;
@@ -1379,7 +1551,18 @@ void DrawFactionSelect() {
 void HandleClicks() {
     Vector2 mousePos = GetMousePosition();
     float currentTime = GetTime();
-    
+    Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
+
+    // --- Placement mode: update ghost + handle RMB confirm ---
+    if (slaveBuildPanel && slaveBuildPanel->placement.active) {
+        slaveBuildPanel->updatePlacement(worldMousePos);
+        if (slaveBuildPanel->handlePlacementInput(worldMousePos)) {
+            return; // consumed
+        }
+        // While in placement mode, block all other clicks
+        return;
+    }
+
     // Спочатку перевіряємо клік по панелі замовлення юнітів (UI координати, без камери)
     if (unitOrderPanel && unitOrderPanel->isVisible()) {
         unitOrderPanel->handleClick(mousePos);
@@ -1394,15 +1577,13 @@ void HandleClicks() {
     if (slaveBuildPanel && slaveBuildPanel->isVisible()) {
         slaveBuildPanel->handleClick(mousePos);
         // Якщо клік був на панелі, не обробляємо далі
-        Rectangle panelRect = {10, 940, 380, 110};
+        Rectangle panelRect = {10, 930, 500, 120};
         if (CheckCollisionPointRec(mousePos, panelRect)) {
             return;
         }
     }
     
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        // ВАЖЛИВО: Конвертуємо координати миші в світові координати з урахуванням камери
-        Vector2 worldMousePos = GetScreenToWorld2D(mousePos, mapCamera);
         
         // DEBUG: Зберігаємо клік для візуалізації
         debugClicks.push_back(worldMousePos);
@@ -1730,6 +1911,39 @@ void DrawGame() {
         if (units[i].isDead()) {
             units.erase(units.begin() + i);
             i--;
+
+            // Перевірка умови перемоги/поразки після кожної смерті юніта
+            {
+                Faction enemyFaction = (playerFaction == ROME) ? CARTHAGE : ROME;
+
+                bool enemyHasBuildings = false;
+                bool playerHasBuildings = false;
+                for (const auto& b : buildings) {
+                    if (b.faction == enemyFaction)  enemyHasBuildings = true;
+                    if (b.faction == playerFaction) playerHasBuildings = true;
+                }
+
+                bool enemyHasCombatUnits = false;
+                bool playerHasCombatUnits = false;
+                for (const auto& u : units) {
+                    if (u.unit_type == "slave") continue;
+                    if (u.faction == enemyFaction)  enemyHasCombatUnits = true;
+                    if (u.faction == playerFaction) playerHasCombatUnits = true;
+                }
+
+                // Живий = є будівлі АБО є бойові юніти (раби не рятують)
+                bool enemyAlive  = enemyHasBuildings  || enemyHasCombatUnits;
+                bool playerAlive = playerHasBuildings || playerHasCombatUnits;
+
+                if (!enemyAlive) {
+                    currentState = VICTORY_SCREEN;
+                    if (audioInitialized) SwitchMusic(MUSIC_VICTORY);
+                } else if (!playerAlive) {
+                    currentState = DEFEAT_SCREEN;
+                    if (audioInitialized) SwitchMusic(MUSIC_DEFEAT);
+                }
+            }
+
             continue;
         }
         
@@ -1772,7 +1986,7 @@ void DrawGame() {
                 } else {
                     // Не в радіусі — переслідуємо по поточній екранній позиції ворога
                     GridCoords enemyGrid = units[nearestEnemy].getGridPosition();
-                    if (!units[i].is_moving || !(units[i].target_position == enemyGrid)) {
+                    if (!units[i].is_moving || !(units[i].final_destination == enemyGrid)) {
                         moveUnitWithPath(units[i], enemyGrid);
                     }
                 }
@@ -1807,7 +2021,7 @@ void DrawGame() {
                         // Переслідуємо будівлю — йдемо до найближчого прохідного тайлу поруч
                         GridCoords bGrid = buildings[nearestEnemyBuilding].getGridPosition();
                         GridCoords walkable = findNearestWalkableTile(bGrid);
-                        if (!units[i].is_moving || !(units[i].target_position == walkable)) {
+                        if (!units[i].is_moving || !(units[i].final_destination == walkable)) {
                             moveUnitWithPath(units[i], walkable);
                         }
                     }
@@ -1818,6 +2032,7 @@ void DrawGame() {
     
     // Оновлення будівель та виробництва
     float deltaTime = GetFrameTime();
+    std::string startedUnit = "";
     for (int bi = 0; bi < (int)buildings.size(); bi++) {
         // Видаляємо знищені будівлі
         if (buildings[bi].isDead()) {
@@ -1833,11 +2048,45 @@ void DrawGame() {
             buildings.erase(buildings.begin() + bi);
             pathfindingManager.updateGrid(buildings);
             bi--;
+
+            // ── Перевірка умови перемоги / поразки ──────────────────────────
+            {
+                Faction enemyFaction = (playerFaction == ROME) ? CARTHAGE : ROME;
+
+                // Будівлі
+                bool enemyHasBuildings = false;
+                bool playerHasBuildings = false;
+                for (const auto& b : buildings) {
+                    if (b.faction == enemyFaction)  enemyHasBuildings = true;
+                    if (b.faction == playerFaction) playerHasBuildings = true;
+                }
+
+                // Бойові юніти (не раби)
+                bool enemyHasCombatUnits = false;
+                bool playerHasCombatUnits = false;
+                for (const auto& u : units) {
+                    if (u.unit_type == "slave") continue;
+                    if (u.faction == enemyFaction)  enemyHasCombatUnits = true;
+                    if (u.faction == playerFaction) playerHasCombatUnits = true;
+                }
+
+                bool enemyAlive  = enemyHasBuildings  || enemyHasCombatUnits;
+                bool playerAlive = playerHasBuildings || playerHasCombatUnits;
+
+                if (!enemyAlive) {
+                    currentState = VICTORY_SCREEN;
+                    if (audioInitialized) SwitchMusic(MUSIC_VICTORY);
+                } else if (!playerAlive) {
+                    currentState = DEFEAT_SCREEN;
+                    if (audioInitialized) SwitchMusic(MUSIC_DEFEAT);
+                }
+            }
+            // ────────────────────────────────────────────────────────────────
+
             continue;
         }
         
         Building& building = buildings[bi];
-        std::string startedUnit = "";
         std::string completedUnit = "";
         building.updateProduction(deltaTime, startedUnit, completedUnit);
         
@@ -1950,10 +2199,12 @@ void DrawGame() {
     }
     
     // DEBUG: Малюємо останні кліки (в світових координатах)
-    for (size_t i = 0; i < debugClicks.size(); i++) {
-        float alpha = (float)(i + 1) / debugClicks.size(); // Новіші яскравіші
-        DrawCircleV(debugClicks[i], 8.0f, {255, 0, 255, (unsigned char)(alpha * 255)});
-        DrawCircleLines((int)debugClicks[i].x, (int)debugClicks[i].y, 8, {255, 255, 255, (unsigned char)(alpha * 255)});
+    if (showDebugVisuals) {
+        for (size_t i = 0; i < debugClicks.size(); i++) {
+            float alpha = (float)(i + 1) / debugClicks.size();
+            DrawCircleV(debugClicks[i], 8.0f, {255, 0, 255, (unsigned char)(alpha * 255)});
+            DrawCircleLines((int)debugClicks[i].x, (int)debugClicks[i].y, 8, {255, 255, 255, (unsigned char)(alpha * 255)});
+        }
     }
     
     // Кінець режиму 2D камери
@@ -2070,6 +2321,7 @@ int main() {
     peacefulMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Peaceful 2.mp3");
     defeatMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Defeat.mp3");
     defeatMusic[1] = LoadMusicStream("assets/sounds/Punic wars_ Castra Defeat 2.mp3");
+    victoryMusic   = LoadMusicStream("assets/sounds/Punic wars_ Castra Victory Rome.mp3");
     
     // Завантаження фону меню
     menuBackground = LoadTexture("assets/Background.png");
@@ -2087,6 +2339,10 @@ int main() {
     } else {
         LOG_TEXTURE("[TEXTURE] Warning: Pause background not loaded!\n");
     }
+    
+    // Завантаження фону перемоги та поразки
+    victoryBackground = LoadTexture("assets/Victory_background.png");
+    defeatBackground  = LoadTexture("assets/Defeat_background.png");
     
     // Завантаження загальної текстури фону (SVG не підтримується, використаємо PNG якщо є)
     backgroundTexture = LoadTexture("assets/background_texture.png");
@@ -2233,6 +2489,12 @@ int main() {
             case PAUSE_MENU:
                 DrawPauseMenu();
                 break;
+            case VICTORY_SCREEN:
+                DrawVictoryScreen();
+                break;
+            case DEFEAT_SCREEN:
+                DrawDefeatScreen();
+                break;
             case EXIT:
                 break;
         }
@@ -2255,11 +2517,14 @@ int main() {
         UnloadMusicStream(peacefulMusic[1]);
         UnloadMusicStream(defeatMusic[0]);
         UnloadMusicStream(defeatMusic[1]);
+        UnloadMusicStream(victoryMusic);
     }
     UnloadTexture(menuBackground);
     UnloadTexture(factionBackground);
     UnloadTexture(settingsBackground);
     UnloadTexture(pauseBackground);
+    UnloadTexture(victoryBackground);
+    UnloadTexture(defeatBackground);
     UnloadTexture(backgroundTexture);
     if (logoLoaded) UnloadTexture(gameLogo);
     if (fontLoaded) UnloadFont(customFont);

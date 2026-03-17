@@ -38,3 +38,7 @@ raylib/
 # Тимчасові файли
 *.tmp
 *.log
+
+# Великі файли інсталятора (перевищують ліміт GitHub 100MB)
+cpp/installer/output/*.zip
+cpp/installer/output/*.exe

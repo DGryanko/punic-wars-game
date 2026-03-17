@@ -31,7 +31,202 @@ def get_project_summary() -> str:
     return """
 # PUNIC WARS: CASTRA - КОНТЕКСТ ПРОЄКТУ
 
-## ПОТОЧНИЙ СТАН (Сесія 9)
+## ПОТОЧНИЙ СТАН (Сесія 10)
+- Гра повністю працює та компілюється
+- Ізометрична система координат (grid-based, 80x80 тайлів)
+- A* pathfinding — юніти обходять будівлі
+- Спрайти для всіх юнітів та будівель (ізометричні PNG)
+- Обидві фракції (Рим і Карфаген) повністю реалізовані
+- Панель замовлення юнітів для HQ та казарм обох фракцій
+- Панель будівництва для рабів з режимом розміщення (ghost preview)
+- Автоматичний цикл збору ресурсів (раб -> ресурс -> база -> ресурс)
+- Бойова система: автоатака юнітів і будівель у радіусі 5 тайлів
+- HP будівель з візуальним баром
+- Динамічна музична система з 8 станами та ротацією треків
+- Екрани перемоги та поразки з відповідною музикою
+- Умова перемоги: знищити всі будівлі та бойові юніти ворога
+- Debug візуалізація (кліки, шляхи) — вмикається в Settings
+- Інсталятор + portable ZIP через build_release.bat
+
+## СТРУКТУРА ФАЙЛІВ
+```
+cpp/
+├── src/
+│   ├── main.cpp                  # Головний файл (~2520 рядків)
+│   ├── building.h                # Система будівель (grid-based, спрайти, HP, виробництво)
+│   ├── unit.h                    # Система юнітів (A* pathfinding, збір ресурсів, бій, final_destination)
+│   ├── resource.h                # Ресурсні точки (їжа, золото)
+│   ├── pathfinding.h             # A* pathfinding на grid
+│   ├── unit_order_panel.h        # Панель замовлення юнітів (HQ + казарми обох фракцій)
+│   ├── slave_build_panel.h       # Панель будівництва для рабів (режим розміщення ghost)
+│   ├── faction_spawner.h         # Спавн тільки ворожого HQ (гравець будує свій сам)
+│   ├── building_placer.h         # Розміщення будівель на grid
+│   ├── isometric_sprite.h        # Рендеринг ізометричних спрайтів
+│   ├── tilemap/
+│   │   ├── tilemap.h             # Ізометрична карта (80x80)
+│   │   ├── coordinates.h         # Конвертація grid <-> screen координат
+│   │   └── tilemap_generator.h   # Генерація карти
+│   └── ...
+├── assets/
+│   ├── sprites/isometric/
+│   │   ├── buildings/            # Praetorium, Skene, Contubernium, LibTent1-3, Questorium, Tentorium
+│   │   └── units/                # legionary_rome, phoenician_carthage, slave_rome, slave_carthage
+│   ├── sounds/                   # Музичні треки (14 файлів, включно з Victory Rome)
+│   ├── Victory_background.png
+│   ├── Defeat_background.png
+│   └── Background.png
+├── compile.bat                   # Компіляція: .\\compile.bat (з директорії cpp)
+├── build_release.bat             # Компіляція + інсталятор + portable ZIP
+├── run.bat                       # Запуск гри
+├── installer/
+│   ├── punic_wars_setup.iss      # Inno Setup скрипт
+│   ├── build_installer.ps1       # PowerShell скрипт пакування
+│   └── output/                   # Готові інсталятор та ZIP
+└── punic_wars.exe
+```
+
+## РЕАЛІЗОВАНІ ФУНКЦІЇ
+
+### 1. МЕНЮ ТА ВИБІР ФРАКЦІЇ
+- Головне меню з фоновим малюнком (START GAME / SETTINGS / EXIT)
+- Фонова музика в меню
+- Екран вибору фракції (ROME / CARTHAGE)
+- Гравець керує своєю фракцією, AI — ворожою
+
+### 2. СТАРТ ГРИ
+- При старті спавниться ТІЛЬКИ один раб гравця на випадковій вільній позиції
+- Ворожий HQ спавниться автоматично (FactionSpawner::spawnEnemyHQ)
+- Гравець будує свій HQ сам через панель раба
+- Камера фокусується на рабі при старті
+
+### 3. ІЗОМЕТРИЧНА СИСТЕМА
+- Grid 80x80 тайлів, ізометрична проекція
+- CoordinateConverter::gridToScreen() / screenToGrid()
+- Тайл: 64px ширина, 32px висота (ізометрично)
+
+### 4. A* PATHFINDING
+- Повна реалізація A* на grid (pathfinding.h)
+- Юніти обходять будівлі та непрохідні тайли
+- final_destination в Unit — кінцева ціль (не проміжний waypoint)
+- Виправлено баг: умова руху перевіряє final_destination, а не target_position
+
+### 5. БУДІВЛІ (9 типів)
+- HQ_ROME (Praetorium.png) — HP 500, виробляє рабів
+- HQ_CARTHAGE (Skene.png) — HP 500, виробляє рабів
+- BARRACKS_ROME (Contubernium.png) — HP 300, виробляє легіонерів (макс 8)
+- BARRACKS_CARTHAGE (LibTent1.png) — HP 300, виробляє фінікійців
+- QUESTORIUM_ROME (Questorium.png) — HP 200, склад ресурсів (x10 ліміт)
+- LIBTENT_1/2/3, TENTORIUM — HP 150
+- Footprint 2x2 тайли для всіх будівель
+
+### 6. ПАНЕЛЬ БУДІВНИЦТВА РАБІВ (slave_build_panel.h) — ОНОВЛЕНО
+- Показується при виборі раба фракції гравця
+- Слоти: HQ, QST, CTB/LBT (+ LT1 для Карфагену)
+- HQ можна побудувати лише ОДИН РАЗ (кнопка блокується після будівництва)
+- Всі інші будівлі розблоковуються тільки після HQ
+- РЕЖИМ РОЗМІЩЕННЯ: ЛКМ на іконці -> ghost спрайт на курсорі (прив'язаний до grid)
+  - Зелений ромб = місце вільне, червоний = зайнято
+  - ПКМ = підтвердити будівництво
+  - ESC = скасувати
+- Кнопка "Harvest" — знайти ресурс у радіусі 3 тайлів
+- Кнопка "Drop off" — відправити до найближчого HQ або Questorium
+
+### 7. СИСТЕМА РЕСУРСІВ
+- FOOD_SOURCE та GOLD_SOURCE на карті
+- Радіус збору: 2 тайли
+- Виправлено баг: раб тепер правильно рухається до dropoff (final_destination fix)
+
+### 8. БОЙОВА СИСТЕМА
+- Автоатака: пошук ворогів у радіусі 320px
+- Атака будівель: радіус attack_range * 5.0f (~150px)
+- Умова перемоги: ворог живий = має будівлі АБО бойові юніти (раби не рахуються)
+- Якщо у ворога лишились тільки раби — поразка
+
+### 9. ЕКРАНИ ПЕРЕМОГИ / ПОРАЗКИ
+- VICTORY_SCREEN: фон Victory_background.png + музика victoryMusic
+- DEFEAT_SCREEN: фон Defeat_background.png + музика defeatMusic
+- Кнопки: START GAME / MAIN MENU / EXIT
+- Музика перемоги/поразки НЕ перебивається UpdateGameMusic
+
+### 10. МУЗИЧНА СИСТЕМА (8 станів)
+- MUSIC_MENU — головне меню
+- MUSIC_AMBIENT — фон геймплею
+- MUSIC_BATTLE_ROME / MUSIC_BATTLE_CARTHAGE — бойова музика
+- MUSIC_SUSPENSE — ворог поблизу
+- MUSIC_PEACEFUL — мирна (будівництво)
+- MUSIC_DEFEAT — поразка
+- MUSIC_VICTORY — перемога (Punic wars_ Castra Victory Rome.mp3)
+- Crossfade між станами (2 секунди)
+- Ротація 2 треків у кожному стані
+
+### 11. НАЛАШТУВАННЯ (Settings)
+- Повзунки: Music Volume, Ambient Volume, Effects Volume
+- Чекбокс: Fullscreen
+- Чекбокс: Debug visuals (кліки рожевими кружечками + жовті лінії шляху)
+  - За замовчуванням ВИМКНЕНО
+
+### 12. КЕРУВАННЯ
+- ЛКМ — вибір юніта / будівлі / режим розміщення будівлі
+- ПКМ — рух / атака / підтвердження будівництва
+- ESC — скасування режиму розміщення / пауза
+- WASD/стрілки — рух камери
+- Edge scroll (20px від краю, 400px/сек)
+- Середня кнопка миші — перетягування камери
+
+## БАЛАНС ГРИ
+
+Початкові ресурси:
+- Рим: 200 їжі, 100 грошей
+- Карфаген: 150 їжі, 200 грошей
+
+Швидкості:
+- Воїни (легіонер, фінікієць): 0.68359375f
+- Раби: 0.48828125f
+
+## КОМПІЛЯЦІЯ ТА ЗАПУСК
+```bash
+# З директорії cpp
+.\\compile.bat        # Компіляція
+.\\run.bat            # Запуск
+.\\build_release.bat  # Компіляція + інсталятор + portable ZIP
+```
+
+## ВАЖЛИВІ ТЕХНІЧНІ ДЕТАЛІ
+
+### Unit.h — final_destination
+- GridCoords final_destination — кінцева ціль руху (не проміжний waypoint)
+- Встановлюється в moveTo() та setPath()
+- ProcessResourceHarvesting перевіряє final_destination замість target_position
+- Це виправляє баг де раб не рухався до dropoff (шлях скидався кожен кадр)
+
+### slave_build_panel.h — BuildPlacementState
+- struct BuildPlacementState { bool active; BuildingType pendingType; GridCoords hoverGrid; bool validSpot; }
+- placement.active = true після ЛКМ на кнопці будівлі
+- updatePlacement(worldMousePos) — оновлює hoverGrid кожен кадр
+- handlePlacementInput(worldMousePos) — обробляє ПКМ/ESC
+- drawGhost() — малює ізометричний ромб (зелений/червоний) в camera mode
+
+### faction_spawner.h — spawnEnemyHQ
+- spawnEnemyHQ(playerFaction) — спавнить тільки ворожий HQ
+- spawnFactionHQs() — залишено для сумісності (не використовується)
+
+### main.cpp — showDebugVisuals
+- bool showDebugVisuals = false — глобальна змінна
+- Контролює: debugClicks кружечки + DrawLine шляху в unit.h
+- extern bool showDebugVisuals в unit.h
+
+## ВИПРАВЛЕНІ БАГИ (Сесія 10)
+- Раб не рухався до dropoff -> виправлено: final_destination замість target_position
+- Музика перемоги перебивалась амбієнтом -> виправлено: guard в UpdateGameMusic
+- HQ спавнився автоматично -> виправлено: тільки ворожий HQ, гравець будує сам
+- Раб спавнявся поруч з HQ якого немає -> виправлено: випадкова вільна позиція
+
+## ТЕХНІЧНІ ДЕТАЛІ
+- Мова: C++, Бібліотека: Raylib 5.5
+- Компілятор: g++ (w64devkit)
+- Роздільна здатність: 1434x1075, 60 FPS
+- Компіляція: .\\compile.bat з директорії cpp
+"""
 - Гра повністю працює та компілюється
 - Ізометрична система координат (grid-based, 80x80 тайлів)
 - A* pathfinding — юніти обходять будівлі

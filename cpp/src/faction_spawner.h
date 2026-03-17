@@ -39,34 +39,31 @@ public:
         config = cfg;
     }
     
-    // Спавн HQ обох фракцій
+    // Спавн HQ обох фракцій (старий метод — залишено для сумісності)
     void spawnFactionHQs() {
+        spawnEnemyHQ(ROME);   // fallback: спавн обох
+        spawnEnemyHQ(CARTHAGE);
+    }
+
+    // Спавн тільки ворожого HQ (гравець будує свій сам)
+    void spawnEnemyHQ(Faction playerFaction) {
         if (!placer || !map || !buildings) {
             LOG_ERROR("[FactionSpawner] Error: Not initialized!\n");
             return;
         }
-        
-        LOG_SPAWN("[FactionSpawner] Spawning faction HQs...\n");
-        
-        // Знайти позицію для Rome HQ
-        GridCoords romePos = findRandomFreeTile();
-        if (romePos.row == -1) {
-            LOG_ERROR("[FactionSpawner] Error: Cannot find free tile for Rome HQ, using fallback (5, 5)\n");
-            romePos = GridCoords(5, 5);
+
+        Faction enemyFaction = (playerFaction == ROME) ? CARTHAGE : ROME;
+
+        LOG_SPAWN("[FactionSpawner] Spawning enemy HQ for faction %d...\n", enemyFaction);
+
+        GridCoords enemyPos = findRandomFreeTile();
+        if (enemyPos.row == -1) {
+            LOG_ERROR("[FactionSpawner] Cannot find free tile for enemy HQ, using fallback\n");
+            enemyPos = (enemyFaction == ROME) ? GridCoords(5, 5) : GridCoords(60, 60);
         }
-        
-        // Знайти позицію для Carthage HQ (з мінімальною відстанню)
-        GridCoords carthagePos = findRandomFreeTileWithDistance(romePos, config.minDistanceBetweenHQs);
-        if (carthagePos.row == -1) {
-            LOG_ERROR("[FactionSpawner] Error: Cannot find free tile for Carthage HQ with min distance, using fallback (45, 45)\n");
-            carthagePos = GridCoords(45, 45);
-        }
-        
-        // Створити HQ
-        createHQ(ROME, romePos);
-        createHQ(CARTHAGE, carthagePos);
-        
-        LOG_SPAWN("[FactionSpawner] HQs spawned successfully\n");
+
+        createHQ(enemyFaction, enemyPos);
+        LOG_SPAWN("[FactionSpawner] Enemy HQ spawned at (%d,%d)\n", enemyPos.row, enemyPos.col);
     }
     
 private:

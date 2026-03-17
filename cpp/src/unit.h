@@ -6,6 +6,8 @@
 #include <string>
 #include <cmath>
 
+extern bool showDebugVisuals; // з main.cpp
+
 // Структура юніта
 struct Unit {
     // НОВИЙ ПІДХІД: Grid coordinates (ізометрична система)
@@ -68,6 +70,7 @@ struct Unit {
     Vector2 lastPosition = {0, 0};    // Остання позиція для виявлення застрягання
     int unstuckAttempts = 0;          // Кількість спроб виходу з застрягання
     bool usePathfinding = true;       // Чи використовувати pathfinding
+    GridCoords final_destination;     // Кінцева ціль (не проміжний waypoint)
     
     // Ініціалізація юніта
     void init(std::string type, Faction unitFaction, GridCoords startPos, bool aiControlled = false) {
@@ -85,6 +88,7 @@ struct Unit {
         has_assigned_resource = false; // NEW: Ініціалізація
         assigned_resource_position = GridCoords(-1, -1); // NEW
         assigned_dropoff_position = GridCoords(-1, -1); // NEW
+        final_destination = startPos; // NEW: Ініціалізація кінцевої цілі
         
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
@@ -338,6 +342,7 @@ struct Unit {
         interpolation_progress = 0.0f;
         is_moving = true;
         is_harvesting = false; // ВАЖЛИВО: припинити збір при русі
+        final_destination = newPos; // Оновлюємо кінцеву ціль
         syncScreenCoords(); // COMPATIBILITY: Оновити screen coords
         printf("[MOVETO] Unit at (%d,%d) moving to (%d,%d), is_moving=true\n", 
                position.row, position.col, newPos.row, newPos.col);
@@ -376,6 +381,8 @@ struct Unit {
         target_position = firstWp;
         // Точна screen-ціль — остання точка шляху
         exact_target_screen = ScreenCoords(path.back().x, path.back().y);
+        // Кінцева ціль — остання точка шляху в grid
+        final_destination = CoordinateConverter::screenToGrid(ScreenCoords(path.back().x, path.back().y));
         syncScreenCoords();
     }
     
@@ -648,8 +655,8 @@ struct Unit {
             DrawCircleLines((int)screenPos.x, (int)screenPos.y, 20, YELLOW);
         }
         
-        // Якщо рухається, показати ціль
-        if (is_moving) {
+        // Якщо рухається, показати ціль (тільки в debug режимі)
+        if (is_moving && showDebugVisuals) {
             ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
             DrawLine((int)screenPos.x, (int)screenPos.y, (int)targetScreen.x, (int)targetScreen.y, YELLOW);
             DrawCircleLines((int)targetScreen.x, (int)targetScreen.y, 8, YELLOW);

@@ -21,54 +21,89 @@ extern const int QUESTORIUM_RESOURCE_CAP;
 class PathfindingManager;
 extern PathfindingManager pathfindingManager;
 
-// Оголошення moveUnitWithPath та moveUnitWithPathToScreen з main.cpp
 extern void moveUnitWithPath(Unit& unit, GridCoords targetPos);
 extern void moveUnitWithPathToScreen(Unit& unit, ScreenCoords goalScreen);
 
-// Зовнішній список ресурсів
 extern std::vector<ResourcePoint> resources;
 
 struct BuildingCost { int food; int money; };
 
 inline BuildingCost getBuildingCost(BuildingType type) {
-    if (type == QUESTORIUM_ROME)    return {20, 30};
-    if (type == BARRACKS_ROME)      return {30, 50};
-    if (type == BARRACKS_CARTHAGE)  return {30, 50};
-    return {0, 0};
+    switch (type) {
+        case HQ_ROME:           return {0,  0};
+        case HQ_CARTHAGE:       return {0,  0};
+        case QUESTORIUM_ROME:   return {20, 30};
+        case BARRACKS_ROME:     return {30, 50};
+        case BARRACKS_CARTHAGE: return {30, 50};
+        case LIBTENT_1:         return {20, 30};
+        case LIBTENT_2:         return {30, 50};
+        case LIBTENT_3:         return {40, 70};
+        case TENTORIUM:         return {25, 40};
+        default:                return {0,  0};
+    }
 }
 
-inline BuildingType getBarracksType(Faction f) {
-    return (f == ROME) ? BARRACKS_ROME : BARRACKS_CARTHAGE;
-}
+// -----------------------------------------------------------------------
+// Placement mode state (shared with main.cpp via extern)
+// -----------------------------------------------------------------------
+struct BuildPlacementState {
+    bool active = false;
+    BuildingType pendingType = HQ_ROME;
+    GridCoords   hoverGrid   = {0, 0};
+    bool         validSpot   = false;
+};
 
+// -----------------------------------------------------------------------
 class SlaveBuildPanel {
+public:
+    // Placement state — read by main.cpp for ghost rendering & RMB confirm
+    BuildPlacementState placement;
+
 private:
     int selectedUnitIndex;
-    std::vector<Unit>* units;
+    std::vector<Unit>*     units;
     std::vector<Building>* buildings;
     Faction playerFaction;
 
+    // Panel layout
     Rectangle panelRect;
-    Rectangle storageButton;
-    Rectangle barracksButton;
-    Rectangle harvestButton;   // Зібрати ресурс
-    Rectangle dropoffButton;   // Скинути ресурс
+
+    // Button slots (we'll lay them out dynamically, but keep fixed rects)
+    // Slot 0: HQ,  Slot 1: Questorium,  Slot 2: Barracks
+    // Slot 3: LibTent1 (Carthage only),  Slot 4: Harvest,  Slot 5: Dropoff
+    static const int MAX_BUILD_SLOTS = 4;
+    Rectangle buildSlots[MAX_BUILD_SLOTS]; // build buttons
+    Rectangle harvestButton;
+    Rectangle dropoffButton;
+
+    // Which BuildingType each slot maps to (faction-dependent, set in draw/handle)
+    BuildingType slotType[MAX_BUILD_SLOTS];
+    int numBuildSlots = 0;
 
 public:
-    SlaveBuildPanel() : selectedUnitIndex(-1), units(nullptr), buildings(nullptr), playerFaction(ROME) {
-        panelRect      = {10, 940, 380, 110};
-        storageButton  = {20,  975,  50,  50};
-        barracksButton = {80,  975,  50,  50};
-        harvestButton  = {160, 975,  90,  50};
-        dropoffButton  = {260, 975,  90,  50};
+    SlaveBuildPanel()
+        : selectedUnitIndex(-1), units(nullptr), buildings(nullptr), playerFaction(ROME)
+    {
+        panelRect = {10, 930, 500, 120};
+
+        // Fixed positions for up to 4 build slots (50x50 each, 10px gap)
+        for (int i = 0; i < MAX_BUILD_SLOTS; i++) {
+            buildSlots[i] = {20.0f + i * 62.0f, 970.0f, 52.0f, 52.0f};
+        }
+        harvestButton = {20.0f + MAX_BUILD_SLOTS * 62.0f,       970.0f, 80.0f, 52.0f};
+        dropoffButton = {20.0f + MAX_BUILD_SLOTS * 62.0f + 90.0f, 970.0f, 80.0f, 52.0f};
     }
 
     void init(std::vector<Unit>* u, std::vector<Building>* b, Faction faction) {
         units = u; buildings = b; playerFaction = faction;
         selectedUnitIndex = -1;
+        placement.active = false;
     }
 
-    void setSelectedUnit(int index) { selectedUnitIndex = index; }
+    void setSelectedUnit(int index) {
+        selectedUnitIndex = index;
+        placement.active = false; // cancel placement on deselect
+    }
 
     bool isVisible() const {
         if (selectedUnitIndex < 0 || !units) return false;
@@ -77,83 +112,195 @@ public:
         return u.unit_type == "slave" && u.faction == playerFaction;
     }
 
+    // Call every frame with current world-space mouse position (already in camera space)
+    void updatePlacement(Vector2 worldMousePos) {
+        if (!placement.active) return;
+        placement.hoverGrid = CoordinateConverter::screenToGrid(
+            ScreenCoords(worldMousePos.x, worldMousePos.y));
+        placement.validSpot = isSpotFree(placement.hoverGrid, placement.pendingType);
+    }
+
+    // Returns true if RMB was consumed (placement confirmed or cancelled)
+    bool handlePlacementInput(Vector2 worldMousePos) {
+        if (!placement.active) return false;
+
+        if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+            if (placement.validSpot) {
+                confirmPlacement(placement.pendingType, placement.hoverGrid);
+            }
+            placement.active = false;
+            return true;
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            placement.active = false;
+            return true;
+        }
+        return false;
+    }
+
     void draw() const {
         if (!isVisible()) return;
+
         DrawRectangleRec(panelRect, {0, 0, 0, 200});
         DrawRectangleLines((int)panelRect.x, (int)panelRect.y,
                            (int)panelRect.width, (int)panelRect.height, WHITE);
-        DrawText("Slave", 20, 950, 16, WHITE);
-        drawStorageButton();
-        drawBarracksButton();
+        DrawText("Slave", 20, 945, 16, WHITE);
+
+        // Build the slot list for current faction
+        SlaveBuildPanel* self = const_cast<SlaveBuildPanel*>(this);
+        self->buildSlotList();
+
+        for (int i = 0; i < numBuildSlots; i++) {
+            drawBuildSlot(i);
+        }
         drawHarvestButton();
         drawDropoffButton();
+
+        // Placement mode hint
+        if (placement.active) {
+            DrawText("RMB to place | ESC to cancel", 20, 910, 14, YELLOW);
+        }
     }
 
     void handleClick(Vector2 mousePos) {
         if (!isVisible()) return;
         if (!CheckCollisionPointRec(mousePos, panelRect)) return;
 
-        if (CheckCollisionPointRec(mousePos, storageButton) &&
-            IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            if (canAffordStorage()) spawnBuilding(QUESTORIUM_ROME);
-            else printf("[SlaveBuildPanel] Cannot afford storage\n");
-        }
+        buildSlotList();
 
-        if (CheckCollisionPointRec(mousePos, barracksButton) &&
-            IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            BuildingType bt = getBarracksType(playerFaction);
-            if (canAffordBarracks()) spawnBuilding(bt);
-            else printf("[SlaveBuildPanel] Cannot afford barracks\n");
+        for (int i = 0; i < numBuildSlots; i++) {
+            if (CheckCollisionPointRec(mousePos, buildSlots[i]) &&
+                IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+            {
+                if (isSlotUnlocked(slotType[i]) && canAffordBuilding(slotType[i])) {
+                    // Enter placement mode
+                    placement.active = true;
+                    placement.pendingType = slotType[i];
+                    printf("[SlaveBuildPanel] Placement mode: type=%d\n", slotType[i]);
+                } else {
+                    printf("[SlaveBuildPanel] Cannot build type=%d (locked or no resources)\n", slotType[i]);
+                }
+                return;
+            }
         }
 
         if (CheckCollisionPointRec(mousePos, harvestButton) &&
             IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             cmdHarvest();
         }
-
         if (CheckCollisionPointRec(mousePos, dropoffButton) &&
             IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             cmdDropoff();
         }
     }
 
+    // Draw ghost building at current hover position (call inside camera mode)
+    void drawGhost() const {
+        if (!placement.active) return;
+
+        ScreenCoords sc = CoordinateConverter::gridToScreen(placement.hoverGrid);
+        Color ghostColor = placement.validSpot
+            ? Color{0, 255, 0, 120}
+            : Color{255, 0, 0, 120};
+
+        // Draw a simple isometric diamond ghost
+        int hw = CoordinateConverter::TILE_WIDTH_HALF * 2;  // 2-tile footprint
+        int hh = CoordinateConverter::TILE_HEIGHT_HALF * 2;
+
+        Vector2 top   = {sc.x,        sc.y - hh};
+        Vector2 right = {sc.x + hw,   sc.y};
+        Vector2 bot   = {sc.x,        sc.y + hh};
+        Vector2 left  = {sc.x - hw,   sc.y};
+
+        DrawTriangle(top, left, bot, ghostColor);
+        DrawTriangle(top, bot, right, ghostColor);
+
+        // Outline
+        Color outlineColor = placement.validSpot ? GREEN : RED;
+        DrawLineV(top, right, outlineColor);
+        DrawLineV(right, bot, outlineColor);
+        DrawLineV(bot, left, outlineColor);
+        DrawLineV(left, top, outlineColor);
+
+        // Building name label
+        BuildingCost cost = getBuildingCost(placement.pendingType);
+        const char* bname = getBuildingName(placement.pendingType);
+        DrawText(bname, (int)sc.x - 30, (int)sc.y - hh - 20, 14, WHITE);
+        DrawText(TextFormat("F:%d M:%d", cost.food, cost.money),
+                 (int)sc.x - 30, (int)sc.y - hh - 4, 12, YELLOW);
+    }
+
 private:
-    bool canAffordStorage() const {
-        BuildingCost c = getBuildingCost(QUESTORIUM_ROME);
-        int f = (playerFaction == ROME) ? rome_food - rome_food_reserved : carth_food - carth_food_reserved;
-        int m = (playerFaction == ROME) ? rome_money - rome_money_reserved : carth_money - carth_money_reserved;
+    // Build the slot list based on faction
+    void buildSlotList() {
+        numBuildSlots = 0;
+        if (playerFaction == ROME) {
+            slotType[numBuildSlots++] = HQ_ROME;
+            slotType[numBuildSlots++] = QUESTORIUM_ROME;
+            slotType[numBuildSlots++] = BARRACKS_ROME;
+        } else {
+            slotType[numBuildSlots++] = HQ_CARTHAGE;
+            slotType[numBuildSlots++] = QUESTORIUM_ROME; // shared questorium
+            slotType[numBuildSlots++] = BARRACKS_CARTHAGE;
+            slotType[numBuildSlots++] = LIBTENT_1;
+        }
+    }
+
+    // Check if a building type is unlocked (requires HQ to exist first)
+    bool isSlotUnlocked(BuildingType type) const {
+        if (type == HQ_ROME || type == HQ_CARTHAGE) {
+            // HQ можна побудувати лише один раз
+            return !playerHasHQ();
+        }
+        // Всі інші будівлі потребують HQ
+        return playerHasHQ();
+    }
+
+    bool playerHasHQ() const {
+        if (!buildings) return false;
+        for (const auto& b : *buildings) {
+            if (b.faction == playerFaction &&
+                (b.type == HQ_ROME || b.type == HQ_CARTHAGE)) return true;
+        }
+        return false;
+    }
+
+    bool canAffordBuilding(BuildingType type) const {
+        BuildingCost c = getBuildingCost(type);
+        int f = (playerFaction == ROME) ? rome_food  - rome_food_reserved
+                                        : carth_food - carth_food_reserved;
+        int m = (playerFaction == ROME) ? rome_money  - rome_money_reserved
+                                        : carth_money - carth_money_reserved;
         return f >= c.food && m >= c.money;
     }
 
-    bool canAffordBarracks() const {
-        BuildingCost c = getBuildingCost(getBarracksType(playerFaction));
-        int f = (playerFaction == ROME) ? rome_food - rome_food_reserved : carth_food - carth_food_reserved;
-        int m = (playerFaction == ROME) ? rome_money - rome_money_reserved : carth_money - carth_money_reserved;
-        return f >= c.food && m >= c.money;
-    }
+    void drawBuildSlot(int i) const {
+        BuildingType type = slotType[i];
+        BuildingCost cost = getBuildingCost(type);
+        bool unlocked = isSlotUnlocked(type);
+        bool affordable = canAffordBuilding(type);
+        bool active = placement.active && placement.pendingType == type;
 
-    void drawStorageButton() const {
-        BuildingCost c = getBuildingCost(QUESTORIUM_ROME);
-        Color col = canAffordStorage() ? DARKGREEN : DARKGRAY;
-        DrawRectangleRec(storageButton, col);
-        DrawRectangleLines((int)storageButton.x, (int)storageButton.y,
-                           (int)storageButton.width, (int)storageButton.height, WHITE);
-        DrawText("QST", (int)storageButton.x + 5, (int)storageButton.y + 10, 12, WHITE);
-        DrawText(TextFormat("F:%d", c.food),  (int)storageButton.x, (int)storageButton.y + 52, 9, YELLOW);
-        DrawText(TextFormat("M:%d", c.money), (int)storageButton.x, (int)storageButton.y + 63, 9, YELLOW);
-    }
+        Color col;
+        if (active)          col = {255, 200, 0, 220};
+        else if (!unlocked)  col = {60, 60, 60, 220};
+        else if (!affordable) col = {80, 40, 40, 220};
+        else                 col = {40, 80, 40, 220};
 
-    void drawBarracksButton() const {
-        BuildingType bt = getBarracksType(playerFaction);
-        BuildingCost c = getBuildingCost(bt);
-        const char* label = (playerFaction == ROME) ? "CTB" : "LBT";
-        Color col = canAffordBarracks() ? DARKBLUE : DARKGRAY;
-        DrawRectangleRec(barracksButton, col);
-        DrawRectangleLines((int)barracksButton.x, (int)barracksButton.y,
-                           (int)barracksButton.width, (int)barracksButton.height, WHITE);
-        DrawText(label, (int)barracksButton.x + 5, (int)barracksButton.y + 10, 12, WHITE);
-        DrawText(TextFormat("F:%d", c.food),  (int)barracksButton.x, (int)barracksButton.y + 52, 9, YELLOW);
-        DrawText(TextFormat("M:%d", c.money), (int)barracksButton.x, (int)barracksButton.y + 63, 9, YELLOW);
+        DrawRectangleRec(buildSlots[i], col);
+        DrawRectangleLines((int)buildSlots[i].x, (int)buildSlots[i].y,
+                           (int)buildSlots[i].width, (int)buildSlots[i].height,
+                           active ? YELLOW : WHITE);
+
+        const char* label = getBuildingShortName(type);
+        DrawText(label, (int)buildSlots[i].x + 4, (int)buildSlots[i].y + 8, 11, WHITE);
+
+        if (!unlocked) {
+            DrawText("LOCK", (int)buildSlots[i].x + 4, (int)buildSlots[i].y + 22, 10, RED);
+        } else {
+            DrawText(TextFormat("F%d", cost.food),  (int)buildSlots[i].x + 2,  (int)buildSlots[i].y + 36, 9, YELLOW);
+            DrawText(TextFormat("M%d", cost.money), (int)buildSlots[i].x + 28, (int)buildSlots[i].y + 36, 9, YELLOW);
+        }
     }
 
     void drawHarvestButton() const {
@@ -172,7 +319,76 @@ private:
         DrawText("(nearest)", (int)dropoffButton.x + 5, (int)dropoffButton.y + 28, 10, LIGHTGRAY);
     }
 
-    // Знайти найближчий ресурс в радіусі 3 тайлів від раба
+    static const char* getBuildingShortName(BuildingType type) {
+        switch (type) {
+            case HQ_ROME:           return "HQ";
+            case HQ_CARTHAGE:       return "HQ";
+            case QUESTORIUM_ROME:   return "QST";
+            case BARRACKS_ROME:     return "CTB";
+            case BARRACKS_CARTHAGE: return "LBT";
+            case LIBTENT_1:         return "LT1";
+            case LIBTENT_2:         return "LT2";
+            case LIBTENT_3:         return "LT3";
+            case TENTORIUM:         return "TNT";
+            default:                return "???";
+        }
+    }
+
+    static const char* getBuildingName(BuildingType type) {
+        switch (type) {
+            case HQ_ROME:           return "Praetorium";
+            case HQ_CARTHAGE:       return "Main Tent";
+            case QUESTORIUM_ROME:   return "Questorium";
+            case BARRACKS_ROME:     return "Contubernium";
+            case BARRACKS_CARTHAGE: return "Libyan Tent";
+            case LIBTENT_1:         return "Libyan Tent I";
+            case LIBTENT_2:         return "Libyan Tent II";
+            case LIBTENT_3:         return "Libyan Tent III";
+            case TENTORIUM:         return "Tentorium";
+            default:                return "Building";
+        }
+    }
+
+    // Check if a 2x2 footprint at pos is free
+    bool isSpotFree(GridCoords pos, BuildingType /*type*/) const {
+        const int FP = 2;
+        for (int r = -1; r < FP + 1; r++) {
+            for (int c = -1; c < FP + 1; c++) {
+                GridCoords t = {pos.row + r, pos.col + c};
+                if (t.row < 1 || t.row >= 79 || t.col < 1 || t.col >= 79) return false;
+                if (!buildings) continue;
+                for (const auto& b : *buildings) {
+                    if (b.occupiesGridCell(t)) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    void confirmPlacement(BuildingType buildingType, GridCoords pos) {
+        if (!canAffordBuilding(buildingType)) {
+            printf("[SlaveBuildPanel] Cannot afford building\n");
+            return;
+        }
+
+        Building newBuilding;
+        newBuilding.init(buildingType, playerFaction, pos);
+        buildings->push_back(newBuilding);
+        pathfindingManager.updateGrid(*buildings);
+
+        BuildingCost cost = getBuildingCost(buildingType);
+        if (playerFaction == ROME) { rome_food -= cost.food; rome_money -= cost.money; }
+        else                       { carth_food -= cost.food; carth_money -= cost.money; }
+
+        printf("[SlaveBuildPanel] Building type=%d placed at grid(%d,%d)\n",
+               buildingType, pos.row, pos.col);
+
+        if (buildingType == QUESTORIUM_ROME) {
+            if (playerFaction == ROME) { rome_food_cap = QUESTORIUM_RESOURCE_CAP; rome_money_cap = QUESTORIUM_RESOURCE_CAP; }
+            else                       { carth_food_cap = QUESTORIUM_RESOURCE_CAP; carth_money_cap = QUESTORIUM_RESOURCE_CAP; }
+        }
+    }
+
     void cmdHarvest() const {
         if (selectedUnitIndex < 0 || !units) return;
         Unit& slave = (*units)[selectedUnitIndex];
@@ -198,7 +414,6 @@ private:
             return;
         }
 
-        // Знаходимо найближчу будівлю здачі
         GridCoords dropoffPos = findNearestDropoff(slavePos);
         if (dropoffPos.row == -1) {
             printf("[SlaveBuildPanel] No dropoff building found\n");
@@ -210,7 +425,6 @@ private:
                nearest->getGridPosition().row, nearest->getGridPosition().col);
     }
 
-    // Відправити раба до найближчої точки здачі
     void cmdDropoff() const {
         if (selectedUnitIndex < 0 || !units) return;
         Unit& slave = (*units)[selectedUnitIndex];
@@ -227,7 +441,6 @@ private:
                dropoffPos.row, dropoffPos.col);
     }
 
-    // Знайти найближчу будівлю здачі ресурсів (HQ або Questorium)
     GridCoords findNearestDropoff(GridCoords from) const {
         GridCoords best = {-1, -1};
         float bestDist = 999999.0f;
@@ -237,66 +450,10 @@ private:
             GridCoords bp = b.getGridPosition();
             float dist = sqrt(pow((float)(from.row - bp.row), 2) +
                               pow((float)(from.col - bp.col), 2));
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = bp;
-            }
+            if (dist < bestDist) { bestDist = dist; best = bp; }
         }
         return best;
-    }
-
-    void spawnBuilding(BuildingType buildingType) const {
-        const Unit& slave = (*units)[selectedUnitIndex];
-        GridCoords buildPos = findFreeBuildSpot(slave.getGridPosition());
-        if (buildPos.row == -1) {
-            printf("[SlaveBuildPanel] No free spot found\n");
-            return;
-        }
-
-        Building newBuilding;
-        newBuilding.init(buildingType, playerFaction, buildPos);
-        buildings->push_back(newBuilding);
-        pathfindingManager.updateGrid(*buildings);
-
-        BuildingCost cost = getBuildingCost(buildingType);
-        if (playerFaction == ROME) { rome_food -= cost.food; rome_money -= cost.money; }
-        else                       { carth_food -= cost.food; carth_money -= cost.money; }
-
-        printf("[SlaveBuildPanel] Building type=%d built at grid(%d,%d)\n",
-               buildingType, buildPos.row, buildPos.col);
-
-        if (buildingType == QUESTORIUM_ROME) {
-            if (playerFaction == ROME) { rome_food_cap = QUESTORIUM_RESOURCE_CAP; rome_money_cap = QUESTORIUM_RESOURCE_CAP; }
-            else                       { carth_food_cap = QUESTORIUM_RESOURCE_CAP; carth_money_cap = QUESTORIUM_RESOURCE_CAP; }
-        }
-    }
-
-    GridCoords findFreeBuildSpot(GridCoords center) const {
-        for (int radius = 2; radius <= 5; radius++) {
-            for (int dr = -radius; dr <= radius; dr++) {
-                for (int dc = -radius; dc <= radius; dc++) {
-                    if (abs(dr) + abs(dc) < radius * 2) continue;
-                    GridCoords pos = {center.row + dr, center.col + dc};
-                    if (pos.row < 1 || pos.row >= 78 || pos.col < 1 || pos.col >= 78) continue;
-
-                    bool isFree = true;
-                    for (int r = -1; r < 3 && isFree; r++) {
-                        for (int c = -1; c < 3 && isFree; c++) {
-                            GridCoords t = {pos.row + r, pos.col + c};
-                            if (t.row < 0 || t.row >= 80 || t.col < 0 || t.col >= 80) { isFree = false; break; }
-                            for (const auto& b : *buildings) {
-                                if (b.occupiesGridCell(t)) { isFree = false; break; }
-                            }
-                        }
-                    }
-                    if (isFree) return pos;
-                }
-            }
-        }
-        return {-1, -1};
     }
 };
 
 #endif // SLAVE_BUILD_PANEL_H
-
-// (class SlaveBuildPanel defined above)
