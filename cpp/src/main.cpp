@@ -1698,27 +1698,28 @@ void DrawGame() {
         
         // Бойова логіка - пошук ворогів поблизу та переслідування
         if (units[i].attack_damage > 0 && !units[i].is_harvesting) {
-            const float AGGRO_RANGE_TILES = 5.0f; // Радіус агресії в тайлах
+            // Радіус агресії в пікселях (5 тайлів ≈ 5 * 64 = 320 пікселів по ширині)
+            const float AGGRO_RANGE_PX = 320.0f;
+            
+            ScreenCoords myScreen = units[i].getScreenPosition();
             
             // Знаходимо найближчого ворожого юніта в радіусі агресії
+            // Використовуємо current_screen_pos щоб бачити юнітів що рухаються
             int nearestEnemy = -1;
-            float nearestDist = AGGRO_RANGE_TILES + 1.0f;
+            float nearestDist = AGGRO_RANGE_PX + 1.0f;
             
             for (int j = 0; j < (int)units.size(); j++) {
                 if (i == j || units[i].faction == units[j].faction) continue;
-                GridCoords myGrid = units[i].getGridPosition();
-                GridCoords enemyGrid = units[j].getGridPosition();
-                float tileDist = sqrt(pow((float)(myGrid.row - enemyGrid.row), 2) +
-                                      pow((float)(myGrid.col - enemyGrid.col), 2));
-                if (tileDist < nearestDist) {
-                    nearestDist = tileDist;
+                ScreenCoords enemyScreen = units[j].getScreenPosition();
+                float pixDist = sqrt(pow(myScreen.x - enemyScreen.x, 2) +
+                                     pow(myScreen.y - enemyScreen.y, 2));
+                if (pixDist < nearestDist) {
+                    nearestDist = pixDist;
                     nearestEnemy = j;
                 }
             }
             
             if (nearestEnemy >= 0) {
-                // Перевіряємо чи в радіусі атаки (в пікселях)
-                ScreenCoords myScreen = units[i].getScreenPosition();
                 ScreenCoords enemyScreen = units[nearestEnemy].getScreenPosition();
                 float pixelDist = sqrt(pow(myScreen.x - enemyScreen.x, 2) +
                                        pow(myScreen.y - enemyScreen.y, 2));
@@ -1729,7 +1730,7 @@ void DrawGame() {
                     units[i].is_moving = false;
                     units[i].attackTarget(units[nearestEnemy]);
                 } else {
-                    // Не в радіусі — переслідуємо (тільки якщо не рухаємося вже до нього)
+                    // Не в радіусі — переслідуємо по поточній екранній позиції ворога
                     GridCoords enemyGrid = units[nearestEnemy].getGridPosition();
                     if (!units[i].is_moving || !(units[i].target_position == enemyGrid)) {
                         moveUnitWithPath(units[i], enemyGrid);
@@ -1738,26 +1739,24 @@ void DrawGame() {
             } else {
                 // Немає ворожих юнітів — шукаємо ворожі будівлі в радіусі агресії
                 int nearestEnemyBuilding = -1;
-                float nearestBuildingDist = AGGRO_RANGE_TILES + 1.0f;
+                float nearestBuildingDist = AGGRO_RANGE_PX + 1.0f;
                 for (int b = 0; b < (int)buildings.size(); b++) {
                     if (buildings[b].faction == units[i].faction) continue;
-                    GridCoords myGrid = units[i].getGridPosition();
-                    GridCoords bGrid = buildings[b].getGridPosition();
-                    float tileDist = sqrt(pow((float)(myGrid.row - bGrid.row), 2) +
-                                          pow((float)(myGrid.col - bGrid.col), 2));
-                    if (tileDist < nearestBuildingDist) {
-                        nearestBuildingDist = tileDist;
+                    ScreenCoords bScreen = buildings[b].getScreenPosition();
+                    float pixDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
+                                         pow(myScreen.y - bScreen.y, 2));
+                    if (pixDist < nearestBuildingDist) {
+                        nearestBuildingDist = pixDist;
                         nearestEnemyBuilding = b;
                     }
                 }
                 if (nearestEnemyBuilding >= 0) {
-                    ScreenCoords myScreen = units[i].getScreenPosition();
                     ScreenCoords bScreen = buildings[nearestEnemyBuilding].getScreenPosition();
                     float pixelDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
                                            pow(myScreen.y - bScreen.y, 2));
                     float currentTime = GetTime();
+                    // Атакуємо будівлю якщо в межах attack_range * 2
                     if (pixelDist <= units[i].attack_range * 2.0f) {
-                        // Атакуємо будівлю
                         units[i].clearPath();
                         units[i].is_moving = false;
                         if (currentTime - units[i].last_attack_time >= units[i].attack_cooldown) {
@@ -1766,6 +1765,7 @@ void DrawGame() {
                             units[i].is_attacking = true;
                         }
                     } else {
+                        // Переслідуємо будівлю
                         GridCoords bGrid = buildings[nearestEnemyBuilding].getGridPosition();
                         if (!units[i].is_moving || !(units[i].target_position == bGrid)) {
                             moveUnitWithPath(units[i], bGrid);

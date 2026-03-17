@@ -156,7 +156,11 @@ struct Unit {
             ai_timer += deltaTime;
             if (ai_timer >= ai_decision_interval) {
                 ai_timer = 0.0f;
-                makeAIDecision();
+                // Не перебиваємо бойову логіку (переслідування/атаку)
+                // makeAIDecision() тільки якщо не атакуємо і не переслідуємо ворога
+                if (!is_attacking && target_unit_id < 0) {
+                    makeAIDecision();
+                }
             }
         }
         
