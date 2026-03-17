@@ -700,7 +700,7 @@ void ProcessResourceHarvesting() {
                     int food, gold;
                     unit.dropResources(food, gold);
                     
-                    if (playerFaction == ROME) {
+                    if (unit.faction == ROME) {
                         rome_food = std::min(rome_food + food, rome_food_cap);
                         rome_money = std::min(rome_money + gold, rome_money_cap);
                     } else {
@@ -1696,14 +1696,80 @@ void DrawGame() {
         // Оновлюємо юніт з перевіркою колізій
         units[i].update(&buildings);
         
-        // Бойова логіка - пошук ворогів поблизу
+        // Бойова логіка - пошук ворогів поблизу та переслідування
         if (units[i].attack_damage > 0 && !units[i].is_harvesting) {
-            for (int j = 0; j < units.size(); j++) {
-                if (i != j && units[i].faction != units[j].faction) {
-                    float distance = sqrt(pow(units[i].x - units[j].x, 2) + pow(units[i].y - units[j].y, 2));
-                    if (distance <= units[i].attack_range) {
-                        units[i].attackTarget(units[j]);
-                        break; // Атакуємо тільки одного ворога за раз
+            const float AGGRO_RANGE_TILES = 5.0f; // Радіус агресії в тайлах
+            
+            // Знаходимо найближчого ворожого юніта в радіусі агресії
+            int nearestEnemy = -1;
+            float nearestDist = AGGRO_RANGE_TILES + 1.0f;
+            
+            for (int j = 0; j < (int)units.size(); j++) {
+                if (i == j || units[i].faction == units[j].faction) continue;
+                GridCoords myGrid = units[i].getGridPosition();
+                GridCoords enemyGrid = units[j].getGridPosition();
+                float tileDist = sqrt(pow((float)(myGrid.row - enemyGrid.row), 2) +
+                                      pow((float)(myGrid.col - enemyGrid.col), 2));
+                if (tileDist < nearestDist) {
+                    nearestDist = tileDist;
+                    nearestEnemy = j;
+                }
+            }
+            
+            if (nearestEnemy >= 0) {
+                // Перевіряємо чи в радіусі атаки (в пікселях)
+                ScreenCoords myScreen = units[i].getScreenPosition();
+                ScreenCoords enemyScreen = units[nearestEnemy].getScreenPosition();
+                float pixelDist = sqrt(pow(myScreen.x - enemyScreen.x, 2) +
+                                       pow(myScreen.y - enemyScreen.y, 2));
+                
+                if (pixelDist <= units[i].attack_range) {
+                    // В радіусі — атакуємо, зупиняємо рух
+                    units[i].clearPath();
+                    units[i].is_moving = false;
+                    units[i].attackTarget(units[nearestEnemy]);
+                } else {
+                    // Не в радіусі — переслідуємо (тільки якщо не рухаємося вже до нього)
+                    GridCoords enemyGrid = units[nearestEnemy].getGridPosition();
+                    if (!units[i].is_moving || !(units[i].target_position == enemyGrid)) {
+                        moveUnitWithPath(units[i], enemyGrid);
+                    }
+                }
+            } else {
+                // Немає ворожих юнітів — шукаємо ворожі будівлі в радіусі агресії
+                int nearestEnemyBuilding = -1;
+                float nearestBuildingDist = AGGRO_RANGE_TILES + 1.0f;
+                for (int b = 0; b < (int)buildings.size(); b++) {
+                    if (buildings[b].faction == units[i].faction) continue;
+                    GridCoords myGrid = units[i].getGridPosition();
+                    GridCoords bGrid = buildings[b].getGridPosition();
+                    float tileDist = sqrt(pow((float)(myGrid.row - bGrid.row), 2) +
+                                          pow((float)(myGrid.col - bGrid.col), 2));
+                    if (tileDist < nearestBuildingDist) {
+                        nearestBuildingDist = tileDist;
+                        nearestEnemyBuilding = b;
+                    }
+                }
+                if (nearestEnemyBuilding >= 0) {
+                    ScreenCoords myScreen = units[i].getScreenPosition();
+                    ScreenCoords bScreen = buildings[nearestEnemyBuilding].getScreenPosition();
+                    float pixelDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
+                                           pow(myScreen.y - bScreen.y, 2));
+                    float currentTime = GetTime();
+                    if (pixelDist <= units[i].attack_range * 2.0f) {
+                        // Атакуємо будівлю
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        if (currentTime - units[i].last_attack_time >= units[i].attack_cooldown) {
+                            buildings[nearestEnemyBuilding].takeDamage(units[i].attack_damage);
+                            units[i].last_attack_time = currentTime;
+                            units[i].is_attacking = true;
+                        }
+                    } else {
+                        GridCoords bGrid = buildings[nearestEnemyBuilding].getGridPosition();
+                        if (!units[i].is_moving || !(units[i].target_position == bGrid)) {
+                            moveUnitWithPath(units[i], bGrid);
+                        }
                     }
                 }
             }
@@ -1712,7 +1778,25 @@ void DrawGame() {
     
     // Оновлення будівель та виробництва
     float deltaTime = GetFrameTime();
-    for (auto& building : buildings) {
+    for (int bi = 0; bi < (int)buildings.size(); bi++) {
+        // Видаляємо знищені будівлі
+        if (buildings[bi].isDead()) {
+            printf("[BUILDING] Building '%s' destroyed!\n", buildings[bi].name.c_str());
+            // Скидаємо вибір якщо знищена вибрана будівля
+            if (selectedBuildingIndex == bi) {
+                selectedBuildingIndex = -1;
+                if (unitOrderPanel) unitOrderPanel->setSelectedBuilding(-1);
+            } else if (selectedBuildingIndex > bi) {
+                selectedBuildingIndex--;
+                if (unitOrderPanel) unitOrderPanel->setSelectedBuilding(selectedBuildingIndex);
+            }
+            buildings.erase(buildings.begin() + bi);
+            pathfindingManager.updateGrid(buildings);
+            bi--;
+            continue;
+        }
+        
+        Building& building = buildings[bi];
         std::string startedUnit = "";
         std::string completedUnit = "";
         building.updateProduction(deltaTime, startedUnit, completedUnit);
@@ -1778,7 +1862,7 @@ void DrawGame() {
             }
         }
         
-    }
+    } // end building loop
     
     // Початок режиму 2D камери для карти та об'єктів
     BeginMode2D(mapCamera);

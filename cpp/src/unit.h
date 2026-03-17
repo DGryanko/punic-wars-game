@@ -104,7 +104,8 @@ struct Unit {
         // Встановлення характеристик залежно від типу
         if (type == "legionary") {
             hp = max_hp = 100;
-            speed = 0.68359375f; // Швидкість руху
+            speed = 0.68359375f;
+            attack_damage = 25;
             attack_range = 30.0f;
             attack_cooldown = 1.5f;
         } else if (type == "phoenician") {

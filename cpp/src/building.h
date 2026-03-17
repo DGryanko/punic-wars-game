@@ -56,6 +56,10 @@ struct Building {
     // Черга виробництва
     std::vector<std::string> production_queue; // Черга юнітів для виробництва
     
+    // HP будівлі
+    int hp = 0;
+    int max_hp = 0;
+    
     // Текстури
     bool use_texture = true;        // Чи використовувати текстуру
     Vector2 texture_offset = {0, 0}; // Зміщення текстури відносно позиції
@@ -71,6 +75,24 @@ struct Building {
         // Встановлення footprint залежно від типу
         // Всі будівлі мають основу 2x2 тайли
         footprint = {2, 2};
+        
+        // Встановлення HP залежно від типу
+        switch (buildingType) {
+            case HQ_ROME:
+            case HQ_CARTHAGE:
+                hp = max_hp = 500;
+                break;
+            case BARRACKS_ROME:
+            case BARRACKS_CARTHAGE:
+                hp = max_hp = 300;
+                break;
+            case QUESTORIUM_ROME:
+                hp = max_hp = 200;
+                break;
+            default:
+                hp = max_hp = 150;
+                break;
+        }
         
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
@@ -131,7 +153,7 @@ struct Building {
                 texture_scale = 1.0f;
                 break;
             case BARRACKS_CARTHAGE:
-                name = "Mercenary Camp";
+                name = "Libyan Tent";
                 texture_offset = {-192, -128};  // Зміщення для ізометричної проекції
                 texture_scale = 1.0f;
                 break;
@@ -303,6 +325,18 @@ struct Building {
             DrawRectangle(barX, barY, (int)(barWidth * progress), 5, GREEN);
             DrawRectangleLines(barX, barY, barWidth, 5, WHITE);
         }
+        
+        // HP бар будівлі (показуємо тільки якщо пошкоджена)
+        if (hp < max_hp && max_hp > 0) {
+            float healthPercent = (float)hp / max_hp;
+            int barWidth = 80;
+            int barX = (int)screenPos.x - barWidth / 2;
+            int barY = (int)screenPos.y - 80; // Над будівлею
+            DrawRectangle(barX, barY, barWidth, 6, DARKGRAY);
+            Color hpColor = (healthPercent > 0.5f) ? GREEN : (healthPercent > 0.25f) ? ORANGE : RED;
+            DrawRectangle(barX, barY, (int)(barWidth * healthPercent), 6, hpColor);
+            DrawRectangleLines(barX, barY, barWidth, 6, WHITE);
+        }
     }
     
     // Почати виробництво юніта або додати до черги
@@ -399,6 +433,17 @@ struct Building {
         std::string unit = producing_unit;
         producing_unit = "";
         return unit;
+    }
+    
+    // Отримати урон
+    void takeDamage(int damage) {
+        hp -= damage;
+        if (hp < 0) hp = 0;
+    }
+    
+    // Перевірити чи будівля знищена
+    bool isDead() const {
+        return hp <= 0;
     }
     
     // Перевірка кліку по будівлі
