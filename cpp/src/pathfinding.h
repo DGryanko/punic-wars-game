@@ -172,10 +172,26 @@ public:
             }
         }
         
-        // Перевіряємо чи ціль досяжна
+        // Перевіряємо чи ціль досяжна, якщо ні - знаходимо найближчий вільний тайл
         if (!grid.isWalkable(goalY, goalX)) {
-            printf("[A*] Goal is not walkable!\n");
-            return std::vector<Vector2>(); // Порожній шлях
+            bool foundFreeGoal = false;
+            for (int radius = 1; radius <= 5 && !foundFreeGoal; radius++) {
+                for (int dy2 = -radius; dy2 <= radius && !foundFreeGoal; dy2++) {
+                    for (int dx2 = -radius; dx2 <= radius && !foundFreeGoal; dx2++) {
+                        if (abs(dy2) != radius && abs(dx2) != radius) continue;
+                        int nrow = goalY + dy2;
+                        int ncol = goalX + dx2;
+                        if (grid.isWalkable(nrow, ncol)) {
+                            goalX = ncol;
+                            goalY = nrow;
+                            foundFreeGoal = true;
+                        }
+                    }
+                }
+            }
+            if (!foundFreeGoal) {
+                return std::vector<Vector2>();
+            }
         }
         
         // Ініціалізація
@@ -228,8 +244,8 @@ public:
                 int ny = current->y + dy[i];
                 int neighborKey = ny * grid.getWidth() + nx;
                 
-                // Перевіряємо чи сусід валідний
-                if (!grid.isWalkable(nx, ny) || closedList[neighborKey]) {
+                // Перевіряємо чи сусід валідний (isWalkable приймає row, col)
+                if (!grid.isWalkable(ny, nx) || closedList[neighborKey]) {
                     continue;
                 }
                 

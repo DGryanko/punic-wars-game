@@ -25,7 +25,7 @@ struct Unit {
     std::string unit_type;       // Тип юніта
     bool selected = false;       // Чи вибраний юніт
     bool is_moving = false;      // Чи рухається юніт
-    float speed = 0.35f;         // Швидкість руху
+    float speed = 0.546875f;     // Швидкість руху
     
     // Isometric sprite system
     IsometricSprite sprite;      // Спрайт юніта
@@ -104,21 +104,19 @@ struct Unit {
         // Встановлення характеристик залежно від типу
         if (type == "legionary") {
             hp = max_hp = 100;
-            speed = 0.35f;  // Швидкість руху
-            can_harvest = false; // Легіонери не збирають ресурси
-            attack_damage = 25;
+            speed = 0.68359375f; // Швидкість руху
             attack_range = 30.0f;
             attack_cooldown = 1.5f;
         } else if (type == "phoenician") {
             hp = max_hp = 90;
-            speed = 0.35f;  // Швидкість руху
+            speed = 0.68359375f; // Швидкість руху
             can_harvest = false; // Фінікійці не збирають ресурси
             attack_damage = 30;
             attack_range = 25.0f;
             attack_cooldown = 1.2f;
         } else if (type == "slave") {
             hp = max_hp = 50;
-            speed = 0.25f;  // Раби повільніші
+            speed = 0.48828125f; // Раби повільніші
             can_harvest = true; // Раби збирають ресурси
             max_carry_capacity = 15;
             attack_damage = 5; // Слабкі в бою
@@ -172,61 +170,80 @@ struct Unit {
         // Рух між grid позиціями з постійною швидкістю
         if (is_moving && !is_attacking) {
             if (!(position == target_position)) {
-                // Зберігаємо стару позицію для відкату при колізії
-                ScreenCoords oldScreenPos = current_screen_pos;
-                
                 // Рухаємося з постійною швидкістю в пікселях за секунду
                 ScreenCoords targetScreen = CoordinateConverter::gridToScreen(target_position);
                 
-                // Обчислюємо відстань до цілі
                 float dx = targetScreen.x - current_screen_pos.x;
                 float dy = targetScreen.y - current_screen_pos.y;
                 float distance = sqrt(dx * dx + dy * dy);
                 
                 if (distance > 0.1f) {
-                    // Нормалізуємо напрямок і рухаємося з постійною швидкістю
-                    float moveDistance = speed * deltaTime * 100.0f; // 100 пікселів/сек при speed=1.0
+                    float moveDistance = speed * deltaTime * 100.0f;
                     
                     if (moveDistance >= distance) {
-                        // Досягли цільової позиції
+                        // Досягли поточного waypoint
                         position = target_position;
                         current_screen_pos = targetScreen;
-                        is_moving = false;
+                        
+                        // Переходимо до наступного waypoint якщо є шлях
+                        if (hasPath()) {
+                            currentWaypointIndex++;
+                            if (currentWaypointIndex < (int)path.size()) {
+                                GridCoords nextWp = CoordinateConverter::screenToGrid(
+                                    ScreenCoords(path[currentWaypointIndex].x, path[currentWaypointIndex].y));
+                                target_position = nextWp;
+                                syncScreenCoords();
+                            } else {
+                                // Шлях завершено
+                                path.clear();
+                                currentWaypointIndex = 0;
+                                is_moving = false;
+                            }
+                        } else {
+                            is_moving = false;
+                        }
                     } else {
-                        // Рухаємося до цілі
                         float ratio = moveDistance / distance;
                         current_screen_pos.x += dx * ratio;
                         current_screen_pos.y += dy * ratio;
                     }
-                    
-                    // Перевірка колізій з будівлями
-                    if (buildings != nullptr) {
-                        Rectangle unitRect = {current_screen_pos.x - 8, current_screen_pos.y - 8, 16, 16};
-                        bool hasCollision = false;
-                        
-                        for (const auto& building : *buildings) {
-                            if (CheckCollisionRecs(unitRect, building.getCollisionRect())) {
-                                hasCollision = true;
-                                break;
-                            }
-                        }
-                        
-                        // Якщо є колізія, відкочуємо позицію
-                        if (hasCollision) {
-                            current_screen_pos = oldScreenPos;
-                            // Зупиняємо рух - юніт застряг
-                            is_moving = false;
-                            printf("[COLLISION] Unit stopped due to building collision\n");
-                        }
-                    }
                 } else {
-                    // Вже на місці
                     position = target_position;
                     current_screen_pos = targetScreen;
-                    is_moving = false;
+                    
+                    if (hasPath()) {
+                        currentWaypointIndex++;
+                        if (currentWaypointIndex < (int)path.size()) {
+                            GridCoords nextWp = CoordinateConverter::screenToGrid(
+                                ScreenCoords(path[currentWaypointIndex].x, path[currentWaypointIndex].y));
+                            target_position = nextWp;
+                            syncScreenCoords();
+                        } else {
+                            path.clear();
+                            currentWaypointIndex = 0;
+                            is_moving = false;
+                        }
+                    } else {
+                        is_moving = false;
+                    }
                 }
             } else {
-                is_moving = false;
+                // Вже на target — переходимо до наступного waypoint
+                if (hasPath()) {
+                    currentWaypointIndex++;
+                    if (currentWaypointIndex < (int)path.size()) {
+                        GridCoords nextWp = CoordinateConverter::screenToGrid(
+                            ScreenCoords(path[currentWaypointIndex].x, path[currentWaypointIndex].y));
+                        target_position = nextWp;
+                        syncScreenCoords();
+                    } else {
+                        path.clear();
+                        currentWaypointIndex = 0;
+                        is_moving = false;
+                    }
+                } else {
+                    is_moving = false;
+                }
             }
         }
         
@@ -284,11 +301,9 @@ struct Unit {
             return;
         }
         
-        // ВАЖЛИВО: Скасувати цикл збору при новій команді руху
-        if (has_assigned_resource) {
-            clearResourceAssignment();
-            printf("[MOVETO] Clearing resource assignment due to new movement command\n");
-        }
+        // ВАЖЛИВО: Скасувати цикл збору тільки якщо це команда від гравця (не від AI/harvesting)
+        // Перевіряємо через окремий флаг - НЕ скасовуємо тут, бо ProcessResourceHarvesting
+        // сам викликає moveTo() і не повинен скидати призначення
         
         // ВАЖЛИВО: Не перевіряємо колізії тут, бо будівлі займають багато клітинок
         // Pathfinding система має обходити будівлі
@@ -300,6 +315,15 @@ struct Unit {
         syncScreenCoords(); // COMPATIBILITY: Оновити screen coords
         printf("[MOVETO] Unit at (%d,%d) moving to (%d,%d), is_moving=true\n", 
                position.row, position.col, newPos.row, newPos.col);
+    }
+    
+    // Команда руху від гравця - скасовує призначення ресурсу
+    void moveToByPlayer(GridCoords newPos) {
+        if (has_assigned_resource) {
+            clearResourceAssignment();
+            printf("[MOVETO] Clearing resource assignment due to new movement command\n");
+        }
+        moveTo(newPos);
     }
     
     // COMPATIBILITY: Встановити ціль для руху (screen coordinates - старий API)
@@ -314,18 +338,22 @@ struct Unit {
         moveTo(gridPos);
     }
     
-    // Встановити шлях для pathfinding (simplified - disabled for now)
+    // Встановити шлях для pathfinding
     void setPath(const std::vector<Vector2>& newPath) {
-        // TODO: Update pathfinding to work with GridCoords
-        // For now, pathfinding is disabled
-        path.clear();
-        // NOTE: Pathfinding logs temporarily disabled
-        // printf("[PATHFINDING] Pathfinding temporarily disabled during grid coord migration\n");
+        if (newPath.empty()) return;
+        path = newPath;
+        currentWaypointIndex = 0;
+        is_moving = true;
+        is_harvesting = false;
+        // Перший waypoint стає target_position
+        GridCoords firstWp = CoordinateConverter::screenToGrid(ScreenCoords(path[0].x, path[0].y));
+        target_position = firstWp;
+        syncScreenCoords();
     }
     
     // Перевірити чи є шлях
     bool hasPath() const {
-        return false; // Disabled during migration
+        return !path.empty() && currentWaypointIndex < (int)path.size();
     }
     
     // Очистити шлях
@@ -333,40 +361,6 @@ struct Unit {
         path.clear();
         currentWaypointIndex = 0;
         is_moving = false;
-    }
-    
-    // Слідувати по шляху
-    void followPath(float deltaTime) {
-        if (!hasPath()) {
-            return;
-        }
-        
-        // Отримуємо поточну точку шляху
-        Vector2 waypoint = path[currentWaypointIndex];
-        
-        // Обчислюємо відстань до точки
-        float dx = waypoint.x - (float)x;
-        float dy = waypoint.y - (float)y;
-        float distance = sqrt(dx * dx + dy * dy);
-        
-        // Якщо досягли точки, переходимо до наступної
-        if (distance < speed + 2.0f) {
-            currentWaypointIndex++;
-            
-            if (currentWaypointIndex >= path.size()) {
-                // Досягли кінця шляху
-                moveTo((int)waypoint.x, (int)waypoint.y); // COMPATIBILITY: використовуємо screen coords
-                is_moving = false;
-                clearPath();
-                return;
-            }
-            
-            // Оновлюємо ціль до наступної точки
-            waypoint = path[currentWaypointIndex];
-            moveTo((int)waypoint.x, (int)waypoint.y); // COMPATIBILITY
-        }
-        
-        // Рух відбувається через update() з інтерполяцією
     }
     
     // Перевірити чи юніт застряг
@@ -437,7 +431,6 @@ struct Unit {
         // NEW: Зберігаємо grid coordinates
         assigned_resource_position = resourcePos;
         assigned_dropoff_position = buildingPos;
-        has_assigned_resource = true;
         
         // COMPATIBILITY: Конвертуємо в screen coords для старого коду
         ScreenCoords resScreen = CoordinateConverter::gridToScreen(resourcePos);
@@ -447,7 +440,16 @@ struct Unit {
         dropoff_building_x = (int)buildScreen.x;
         dropoff_building_y = (int)buildScreen.y;
         
-        moveTo(resourcePos);
+        // ВАЖЛИВО: moveTo() скидає has_assigned_resource, тому встановлюємо після
+        target_position = resourcePos;
+        interpolation_progress = 0.0f;
+        is_moving = true;
+        is_harvesting = false;
+        syncScreenCoords();
+        
+        // Встановлюємо флаг ПІСЛЯ руху, щоб moveTo() не скинув його
+        has_assigned_resource = true;
+        
         printf("Unit assigned: resource(%d,%d) building(%d,%d)\n", 
                resourcePos.row, resourcePos.col, buildingPos.row, buildingPos.col);
     }

@@ -72,6 +72,14 @@ int carth_money = 200;
 int carth_food_reserved = 0;
 int carth_money_reserved = 0;
 
+// Ліміти зберігання ресурсів
+int rome_food_cap = 500;
+int rome_money_cap = 500;
+int carth_food_cap = 500;
+int carth_money_cap = 500;
+const int BASE_RESOURCE_CAP = 500;
+const int QUESTORIUM_RESOURCE_CAP = 5000; // x10 при будівництві квесторія
+
 // Музика та звуки
 Music menuMusic;
 Music ambientMusic[2];          // 2 амбієнт треки
@@ -496,24 +504,49 @@ bool isPathBlockedByBuilding(GridCoords from, GridCoords to) {
     if (isGridCellOccupiedByBuilding(to)) {
         return true;
     }
-    
-    // Додаткова перевірка - чи є будівлі між стартом і ціллю
-    // Для простоти перевіряємо тільки цільову позицію та сусідні клітинки
-    for (int dr = -1; dr <= 1; dr++) {
-        for (int dc = -1; dc <= 1; dc++) {
-            GridCoords checkPos = {to.row + dr, to.col + dc};
-            if (isGridCellOccupiedByBuilding(checkPos)) {
-                // Перевіряємо чи ця будівля блокує прямий шлях
-                for (const auto& building : buildings) {
-                    if (building.occupiesGridCell(checkPos) && building.occupiesGridCell(to)) {
-                        return true;
-                    }
+    return false;
+}
+
+// Знайти найближчий прохідний тайл поруч з позицією (для руху до будівель)
+GridCoords findNearestWalkableTile(GridCoords target) {
+    if (!isGridCellOccupiedByBuilding(target)) {
+        return target; // Вже вільний
+    }
+    // Шукаємо по спіралі навколо цілі
+    for (int radius = 1; radius <= 5; radius++) {
+        for (int dr = -radius; dr <= radius; dr++) {
+            for (int dc = -radius; dc <= radius; dc++) {
+                if (abs(dr) != radius && abs(dc) != radius) continue; // Тільки периметр
+                GridCoords candidate = {target.row + dr, target.col + dc};
+                if (candidate.row < 0 || candidate.row >= 80 || 
+                    candidate.col < 0 || candidate.col >= 80) continue;
+                if (!isGridCellOccupiedByBuilding(candidate)) {
+                    return candidate;
                 }
             }
         }
     }
+    return target; // Fallback
+}
+
+// Рух юніта з A* pathfinding (обходить будівлі)
+void moveUnitWithPath(Unit& unit, GridCoords targetPos) {
+    ScreenCoords startScreen = unit.getScreenPosition();
+    ScreenCoords goalScreen = CoordinateConverter::gridToScreen(targetPos);
     
-    return false;
+    AStarPathfinder pathfinder;
+    std::vector<Vector2> path = pathfinder.findPath(
+        {startScreen.x, startScreen.y},
+        {goalScreen.x, goalScreen.y},
+        pathfindingManager.getGrid()
+    );
+    
+    if (!path.empty()) {
+        unit.setPath(path);
+    } else {
+        // Fallback: пряма лінія якщо шлях не знайдено
+        unit.moveTo(targetPos);
+    }
 }
 
 void selectAllUnitsOfType(const std::string& unitType) {
@@ -659,30 +692,30 @@ void ProcessResourceHarvesting() {
                 float distToDropoff = sqrt(pow(unitPos.row - dropoffPos.row, 2) + 
                                           pow(unitPos.col - dropoffPos.col, 2));
                 
-                // Якщо поруч з будівлею (20 пікселів від центру за вашим запитом)
-                if (distToDropoff < 20.0f / 64.0f) { // 20 пікселів / 64 пікселі на тайл
-                    // Здати ресурси
+                // Якщо поруч з будівлею (в межах 2 тайлів)
+                if (distToDropoff < 2.0f) {
+                    // Здати ресурси (з урахуванням ліміту)
                     int food, gold;
                     unit.dropResources(food, gold);
                     
                     if (playerFaction == ROME) {
-                        rome_food += food;
-                        rome_money += gold;
+                        rome_food = std::min(rome_food + food, rome_food_cap);
+                        rome_money = std::min(rome_money + gold, rome_money_cap);
                     } else {
-                        carth_food += food;
-                        carth_money += gold;
+                        carth_food = std::min(carth_food + food, carth_food_cap);
+                        carth_money = std::min(carth_money + gold, carth_money_cap);
                     }
                     
                     printf("[DROP] Resources dropped: food=%d, gold=%d. Total: food=%d money=%d\n", 
                            food, gold, rome_food, rome_money);
                     
                     // Повернутися до ресурсу
-                    unit.moveTo(resourcePos);
+                    moveUnitWithPath(unit, resourcePos);
                     printf("[RETURN] Returning to resource at grid(%d,%d)\n", resourcePos.row, resourcePos.col);
                 } else {
                     // Рухаємося до будівлі здачі
                     if (!unit.is_moving || !(unit.target_position == dropoffPos)) {
-                        unit.moveTo(dropoffPos);
+                        moveUnitWithPath(unit, dropoffPos);
                         printf("[MOVE_TO_DROPOFF] Moving to dropoff at grid(%d,%d), distance=%.1f\n", 
                                dropoffPos.row, dropoffPos.col, distToDropoff);
                     }
@@ -721,7 +754,7 @@ void ProcessResourceHarvesting() {
                 } else {
                     // Рухаємося до ресурсу
                     if (!unit.is_moving || !(unit.target_position == resourcePos)) {
-                        unit.moveTo(resourcePos);
+                        moveUnitWithPath(unit, resourcePos);
                         printf("[MOVE_TO_RESOURCE] Moving to resource at grid(%d,%d), distance=%.1f\n", 
                                resourcePos.row, resourcePos.col, distToResource);
                     }
@@ -770,6 +803,14 @@ void InitBuildings() {
     
     // Оновлюємо pathfinding grid з новими будівлями
     pathfindingManager.updateGrid(buildings);
+    
+    // Переініціалізуємо UI панелі з правильною фракцією
+    if (unitOrderPanel) {
+        unitOrderPanel->init(&buildings, playerFaction);
+    }
+    if (slaveBuildPanel) {
+        slaveBuildPanel->init(&units, &buildings, playerFaction);
+    }
     
     printf("[BUILDINGS] Initialization complete: %d buildings spawned\n", (int)buildings.size());
 }
@@ -862,28 +903,25 @@ void InitResources() {
 void SpawnUnit(const Building& building, const std::string& unitType) {
     Unit newUnit;
     
-    // Початкова позиція - праворуч від будівлі (screen coords)
-    int spawnX = building.x + 90;
-    int spawnY = building.y + 30;
+    // Спавн на 2 тайли праворуч-вниз від будівлі (вихід з Praetorium)
+    GridCoords buildingPos = building.getGridPosition();
+    GridCoords spawnGrid = {
+        buildingPos.row + building.footprint.row + 1,  // нижче будівлі
+        buildingPos.col + building.footprint.col + 1   // правіше будівлі
+    };
     
-    // Конвертуємо в grid координати
-    GridCoords spawnGrid = pathfindingManager.getGrid().worldToGrid(ScreenCoords(spawnX, spawnY));
-    int gridRow = spawnGrid.row;
-    int gridCol = spawnGrid.col;
-    
+    // Шукаємо вільний тайл поруч зі спавн-позицією
     bool foundFree = false;
-    // Шукаємо в радіусі до 5 клітинок
     for (int radius = 0; radius <= 5 && !foundFree; radius++) {
         for (int dy = -radius; dy <= radius && !foundFree; dy++) {
             for (int dx = -radius; dx <= radius && !foundFree; dx++) {
-                int nrow = gridRow + dy;
-                int ncol = gridCol + dx;
-                if (pathfindingManager.getGrid().isWalkable(nrow, ncol)) {
-                    // Конвертуємо назад в світові координати
-                    ScreenCoords freeScreen = pathfindingManager.getGrid().gridToWorld(GridCoords(nrow, ncol));
-                    spawnX = (int)freeScreen.x;
-                    spawnY = (int)freeScreen.y;
-                    foundFree = true;
+                int nrow = spawnGrid.row + dy;
+                int ncol = spawnGrid.col + dx;
+                if (nrow >= 0 && nrow < 80 && ncol >= 0 && ncol < 80) {
+                    if (pathfindingManager.getGrid().isWalkable(nrow, ncol)) {
+                        spawnGrid = {nrow, ncol};
+                        foundFree = true;
+                    }
                 }
             }
         }
@@ -893,16 +931,11 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
         printf("[SPAWN] Warning: Could not find free spawn position for unit!\n");
     }
     
-    // Визначаємо, чи має юніт керуватися AI
     bool isAI = (building.faction != playerFaction);
-    
-    // Конвертуємо screen coords в grid coords для нової системи
-    GridCoords spawnGridPos = CoordinateConverter::screenToGrid(ScreenCoords(spawnX, spawnY));
-    newUnit.init(unitType, building.faction, spawnGridPos, isAI);
+    newUnit.init(unitType, building.faction, spawnGrid, isAI);
     units.push_back(newUnit);
     
-    printf("[SPAWN] Unit spawned at grid(%d, %d) screen(%d, %d)\n", 
-           spawnGridPos.row, spawnGridPos.col, spawnX, spawnY);
+    printf("[SPAWN] Unit '%s' spawned at grid(%d, %d)\n", unitType.c_str(), spawnGrid.row, spawnGrid.col);
 }
 
 // Функція для малювання меню налаштувань
@@ -1501,12 +1534,15 @@ void HandleClicks() {
                 bool foundResource = false;
                 for (int i = 0; i < resources.size(); i++) {
                     if (!resources[i].depleted && resources[i].isClicked(worldMousePos)) {
-                        // Знаходимо найближчий КВЕСТОРІУМ для здачі ресурсів
+                        // Знаходимо найближчий КВЕСТОРІУМ або ПРАЕТОРІЙ для здачі ресурсів
                         GridCoords nearestBuildingPos = {-1, -1};
                         float minDist = 999999.0f;
                         
                         for (const auto& building : buildings) {
-                            if (building.faction == playerFaction && building.type == QUESTORIUM_ROME) {
+                            if (building.faction == playerFaction && 
+                                (building.type == QUESTORIUM_ROME ||
+                                 building.type == HQ_ROME ||
+                                 building.type == HQ_CARTHAGE)) {
                                 GridCoords buildingPos = building.getGridPosition();
                                 GridCoords resourcePos = resources[i].getGridPosition();
                                 float dist = sqrt(pow(buildingPos.row - resourcePos.row, 2) + 
@@ -1518,31 +1554,16 @@ void HandleClicks() {
                             }
                         }
                         
-                        // Якщо не знайшли квесторіум, шукаємо HQ
-                        if (nearestBuildingPos.row == -1) {
-                            for (const auto& building : buildings) {
-                                if (building.faction == playerFaction && 
-                                    (building.type == HQ_ROME || building.type == HQ_CARTHAGE)) {
-                                    GridCoords buildingPos = building.getGridPosition();
-                                    GridCoords resourcePos = resources[i].getGridPosition();
-                                    float dist = sqrt(pow(buildingPos.row - resourcePos.row, 2) + 
-                                                    pow(buildingPos.col - resourcePos.col, 2));
-                                    if (dist < minDist) {
-                                        minDist = dist;
-                                        nearestBuildingPos = buildingPos;
-                                    }
-                                }
-                            }
-                        }
-                        
                         // Відправляємо збирачів до ресурсу з призначенням
                         for (auto& unit : units) {
                             if (unit.selected && unit.faction == playerFaction && unit.can_harvest) {
                                 if (nearestBuildingPos.row != -1) {
-                                    unit.assignResource(resources[i].getGridPosition(), nearestBuildingPos);
+                                    // Знаходимо прохідний тайл поруч з будівлею здачі
+                                    GridCoords walkableDropoff = findNearestWalkableTile(nearestBuildingPos);
+                                    unit.assignResource(resources[i].getGridPosition(), walkableDropoff);
                                     printf("Slave assigned to resource at grid(%d, %d), dropoff at grid(%d, %d)\n", 
                                            resources[i].getGridPosition().row, resources[i].getGridPosition().col,
-                                           nearestBuildingPos.row, nearestBuildingPos.col);
+                                           walkableDropoff.row, walkableDropoff.col);
                                 }
                             }
                         }
@@ -1553,26 +1574,16 @@ void HandleClicks() {
                 
                 // Якщо не клікнули по ресурсу або ворогу, звичайний рух до grid позиції
                 if (!foundResource) {
-                    // Перевіряємо чи ціль не зайнята будівлею або шлях не блокований
-                    if (isPathBlockedByBuilding(units[0].getGridPosition(), gridPos)) {
-                        printf("[MOVE] Cannot move to grid(%d,%d) - blocked by building\n", 
-                               gridPos.row, gridPos.col);
-                    } else {
-                        // Рухаємо юніти до grid координат
-                        for (int i = 0; i < units.size(); i++) {
-                            if (units[i].selected && units[i].faction == playerFaction) {
-                                // Використовуємо grid координати для руху
-                                units[i].moveTo(gridPos);
-                                units[i].target_unit_id = -1; // Скидаємо ціль атаки
-                                
-                                // Скидаємо призначений ресурс при ручному русі
-                                if (units[i].can_harvest) {
-                                    units[i].assigned_resource_x = -1;
-                                    units[i].assigned_resource_y = -1;
-                                }
-                                
-                                printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, gridPos.row, gridPos.col);
-                            }
+                    // Знаходимо найближчий прохідний тайл (якщо клікнули на будівлю)
+                    GridCoords targetPos = findNearestWalkableTile(gridPos);
+                    
+                    // Рухаємо юніти до grid координат з pathfinding
+                    for (int i = 0; i < units.size(); i++) {
+                        if (units[i].selected && units[i].faction == playerFaction) {
+                            units[i].moveToByPlayer(targetPos); // скасовує призначення ресурсу
+                            moveUnitWithPath(units[i], targetPos);
+                            units[i].target_unit_id = -1;
+                            printf("[MOVE] Unit %d moving to grid(%d,%d)\n", i, targetPos.row, targetPos.col);
                         }
                     }
                 }
@@ -1725,7 +1736,19 @@ void DrawGame() {
             if (ai_building_timer >= 10.0f) {
                 ai_building_timer = 0.0f;
                 
-                if (building.type == BARRACKS_ROME) {
+                if (building.type == HQ_ROME || building.type == HQ_CARTHAGE) {
+                    if (canAfford(building.faction, "slave")) {
+                        bool shouldPayNow = false;
+                        if (building.startProduction("slave", shouldPayNow)) {
+                            if (shouldPayNow) {
+                                reserveResources(building.faction, "slave");
+                                spendResources(building.faction, "slave");
+                            } else {
+                                reserveResources(building.faction, "slave");
+                            }
+                        }
+                    }
+                } else if (building.type == BARRACKS_ROME) {
                     if (canAfford(building.faction, "legionary")) {
                         bool shouldPayNow = false;
                         if (building.startProduction("legionary", shouldPayNow)) {
@@ -1738,18 +1761,6 @@ void DrawGame() {
                         }
                     }
                 } else if (building.type == BARRACKS_CARTHAGE) {
-                    if (canAfford(building.faction, "phoenician")) {
-                        bool shouldPayNow = false;
-                        if (building.startProduction("phoenician", shouldPayNow)) {
-                            if (shouldPayNow) {
-                                reserveResources(building.faction, "phoenician");
-                                spendResources(building.faction, "phoenician");
-                            } else {
-                                reserveResources(building.faction, "phoenician");
-                            }
-                        }
-                    }
-                } else if (building.type == HQ_CARTHAGE) {
                     if (canAfford(building.faction, "phoenician")) {
                         bool shouldPayNow = false;
                         if (building.startProduction("phoenician", shouldPayNow)) {
@@ -1765,54 +1776,6 @@ void DrawGame() {
             }
         }
         
-        // AI для ворожих будівель
-        if (building.faction != playerFaction && !building.is_producing) {
-            // Простий AI: виробляти юніти кожні 10 секунд
-            static float ai_building_timer = 0.0f;
-            ai_building_timer += deltaTime;
-            
-            if (ai_building_timer >= 10.0f) {
-                ai_building_timer = 0.0f;
-                
-                if (building.type == BARRACKS_ROME) {
-                    if (canAfford(building.faction, "legionary")) {
-                        bool shouldPayNow = false;
-                        if (building.startProduction("legionary", shouldPayNow)) {
-                            if (shouldPayNow) {
-                                reserveResources(building.faction, "legionary");
-                                spendResources(building.faction, "legionary");
-                            } else {
-                                reserveResources(building.faction, "legionary");
-                            }
-                        }
-                    }
-                } else if (building.type == BARRACKS_CARTHAGE) {
-                    if (canAfford(building.faction, "phoenician")) {
-                        bool shouldPayNow = false;
-                        if (building.startProduction("phoenician", shouldPayNow)) {
-                            if (shouldPayNow) {
-                                reserveResources(building.faction, "phoenician");
-                                spendResources(building.faction, "phoenician");
-                            } else {
-                                reserveResources(building.faction, "phoenician");
-                            }
-                        }
-                    }
-                } else if (building.type == HQ_CARTHAGE) {
-                    if (canAfford(building.faction, "phoenician")) {
-                        bool shouldPayNow = false;
-                        if (building.startProduction("phoenician", shouldPayNow)) {
-                            if (shouldPayNow) {
-                                reserveResources(building.faction, "phoenician");
-                                spendResources(building.faction, "phoenician");
-                            } else {
-                                reserveResources(building.faction, "phoenician");
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
     
     // Початок режиму 2D камери для карти та об'єктів

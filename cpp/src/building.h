@@ -173,9 +173,15 @@ struct Building {
         tile_col = position.col;
     }
     
-    // Отримати screen позицію (для рендерингу)
+    // Отримати screen позицію (центр footprint будівлі для рендерингу)
     ScreenCoords getScreenPosition() const {
-        return CoordinateConverter::gridToScreen(position);
+        // Центр footprint: position + (footprint/2)
+        // Для 2x2: center = position + (1,1)
+        GridCoords center = {
+            position.row + footprint.row / 2,
+            position.col + footprint.col / 2
+        };
+        return CoordinateConverter::gridToScreen(center);
     }
     
     // Отримати grid позицію
@@ -394,35 +400,26 @@ struct Building {
         return unit;
     }
     
-    // Перевірка кліку по ізометричному ромбу
+    // Перевірка кліку по будівлі
     bool isClicked(Vector2 mousePos) const {
-        ScreenCoords screenPos = getScreenPosition();
-        
-        // Зміщуємо область кліку вгору на 64 пікселів (1 тайл)
-        // Це відповідає offset -1 row, -1 col в occupiesGridCell
-        float offsetY = -CoordinateConverter::TILE_HEIGHT;  // -64 пікселів
-        
-        // Переводимо mouse position в локальні координати відносно центру будівлі
-        float localX = mousePos.x - screenPos.x;
-        float localY = mousePos.y - (screenPos.y + offsetY);
-        
-        // Для ізометричного ромба використовуємо формулу:
-        // |localX / halfWidth| + |localY / halfHeight| <= 1
-        // Використовуємо розміри тайлів з CoordinateConverter
-        
-        float halfWidth = footprint.col * CoordinateConverter::TILE_WIDTH_HALF;
-        float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF;
-        
-        // Перевірка чи точка всередині ромба
-        float normalized = fabs(localX / halfWidth) + fabs(localY / halfHeight);
-        
-        bool result = normalized <= 1.0f;
-        
-        if (result) {
-            printf("[isClicked] HIT! Building '%s' at grid(%d,%d), screen(%.1f,%.1f), mouse(%.1f,%.1f), normalized=%.2f\n",
-                   name.c_str(), position.row, position.col, screenPos.x, screenPos.y, mousePos.x, mousePos.y, normalized);
+        // Конвертуємо mouse position в grid і перевіряємо footprint
+        GridCoords clickGrid = CoordinateConverter::screenToGrid(ScreenCoords(mousePos.x, mousePos.y));
+        if (occupiesGridCell(clickGrid)) {
+            printf("[isClicked] HIT via grid! Building '%s'\n", name.c_str());
+            return true;
         }
         
+        // Також перевіряємо сусідні тайли (для точності кліку по спрайту)
+        ScreenCoords screenPos = getScreenPosition();
+        float offsetY = -96.0f;
+        float localX = mousePos.x - screenPos.x;
+        float localY = mousePos.y - (screenPos.y + offsetY);
+        float halfWidth  = footprint.col * CoordinateConverter::TILE_WIDTH_HALF * 1.5f;
+        float halfHeight = footprint.row * CoordinateConverter::TILE_HEIGHT_HALF * 3.0f;
+        bool result = fabs(localX / halfWidth) + fabs(localY / halfHeight) <= 1.0f;
+        if (result) {
+            printf("[isClicked] HIT via sprite! Building '%s'\n", name.c_str());
+        }
         return result;
     }
 };

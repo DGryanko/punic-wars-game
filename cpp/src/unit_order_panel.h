@@ -6,7 +6,6 @@
 #include <vector>
 #include <string>
 
-// Зовнішні функції для роботи з ресурсами (оголошені в main.cpp)
 extern bool canAfford(Faction faction, const std::string& unitType);
 extern void reserveResources(Faction faction, const std::string& unitType);
 extern void spendResources(Faction faction, const std::string& unitType);
@@ -18,155 +17,125 @@ struct UnitCost {
 };
 
 inline UnitCost getUnitCost(const std::string& unitType) {
-    if (unitType == "legionary") {
-        return {30, 50};
-    } else if (unitType == "phoenician") {
-        return {25, 60};
-    } else if (unitType == "slave") {
-        return {10, 20};
-    }
+    if (unitType == "legionary")  return {30, 50};
+    if (unitType == "phoenician") return {25, 60};
+    if (unitType == "slave")      return {10, 20};
     return {0, 0};
 }
 
-// UI панель для замовлення юнітів
 class UnitOrderPanel {
 private:
     int selectedBuildingIndex;
     std::vector<Building>* buildings;
     Faction playerFaction;
-    
-    // UI елементи
+
     Rectangle panelRect;
-    Rectangle workerButton;
-    
+    Rectangle btn1;   // slave (HQ) або legionary/phoenician (barracks)
+    Rectangle btn2;   // slave (barracks carthage)
+
+    // Повертає тип юніта для кнопки залежно від будівлі
+    std::string getBtn1Unit() const {
+        const Building& b = (*buildings)[selectedBuildingIndex];
+        if (b.type == HQ_ROME || b.type == HQ_CARTHAGE) return "slave";
+        if (b.type == BARRACKS_ROME)     return "legionary";
+        if (b.type == BARRACKS_CARTHAGE) return "phoenician";
+        return "";
+    }
+
 public:
     UnitOrderPanel() : selectedBuildingIndex(-1), buildings(nullptr), playerFaction(ROME) {
         panelRect = {10, 950, 300, 100};
-        workerButton = {20, 985, 50, 50};
+        btn1 = {20, 985, 50, 50};
+        btn2 = {80, 985, 50, 50};
     }
-    
-    // Ініціалізація
+
     void init(std::vector<Building>* b, Faction faction) {
         buildings = b;
         playerFaction = faction;
         selectedBuildingIndex = -1;
     }
-    
-    // Встановити вибрану будівлю
-    void setSelectedBuilding(int index) {
-        selectedBuildingIndex = index;
+
+    void setSelectedBuilding(int index) { selectedBuildingIndex = index; }
+
+    bool isVisible() const {
+        if (selectedBuildingIndex < 0 || !buildings) return false;
+        if (selectedBuildingIndex >= (int)buildings->size()) return false;
+        const Building& b = (*buildings)[selectedBuildingIndex];
+        if (b.faction != playerFaction) return false;
+        return b.type == HQ_ROME || b.type == HQ_CARTHAGE ||
+               b.type == BARRACKS_ROME || b.type == BARRACKS_CARTHAGE;
     }
-    
-    // Малювання панелі
+
     void draw() const {
         if (!isVisible()) return;
-        
-        const Building& selected = (*buildings)[selectedBuildingIndex];
-        
-        // Панель знизу зліва
+        const Building& b = (*buildings)[selectedBuildingIndex];
+
         DrawRectangleRec(panelRect, {0, 0, 0, 200});
-        DrawRectangleLines((int)panelRect.x, (int)panelRect.y, (int)panelRect.width, (int)panelRect.height, WHITE);
-        
-        // Назва будівлі
-        DrawText(selected.name.c_str(), 20, 960, 16, WHITE);
-        
-        // Малюємо кнопку Worker
-        drawWorkerButton();
-        
+        DrawRectangleLines((int)panelRect.x, (int)panelRect.y,
+                           (int)panelRect.width, (int)panelRect.height, WHITE);
+        DrawText(b.name.c_str(), 20, 960, 16, WHITE);
+
+        drawUnitButton(btn1, getBtn1Unit());
+
         // Прогрес виробництва
-        if (selected.is_producing) {
-            float progress = selected.production_progress / selected.production_time;
+        if (b.is_producing) {
+            float progress = b.production_progress / b.production_time;
             DrawRectangle(20, 1040, (int)(260 * progress), 8, GREEN);
             DrawRectangleLines(20, 1040, 260, 8, WHITE);
             DrawText("PRODUCING...", 100, 1042, 12, WHITE);
         }
     }
-    
-    // Обробка кліків
+
     void handleClick(Vector2 mousePos) {
         if (!isVisible()) return;
-        
-        // Перевірка кліку на панелі (щоб не обробляти клік поза панеллю)
         if (!CheckCollisionPointRec(mousePos, panelRect)) return;
-        
-        const Building& selected = (*buildings)[selectedBuildingIndex];
-        
-        // Обробка кліку на кнопку Worker
-        if (selected.type == HQ_ROME || selected.type == HQ_CARTHAGE) {
-            if (CheckCollisionPointRec(mousePos, workerButton)) {
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    if (canAffordWorker()) {
-                        bool shouldPayNow = false;
-                        if ((*buildings)[selectedBuildingIndex].startProduction("slave", shouldPayNow)) {
-                            if (shouldPayNow) {
-                                reserveResources(playerFaction, "slave");
-                                spendResources(playerFaction, "slave");
-                                printf("[UnitOrderPanel] Started producing slave (paid now)\n");
-                            } else {
-                                reserveResources(playerFaction, "slave");
-                                printf("[UnitOrderPanel] Queued slave (reserved resources)\n");
-                            }
-                        }
-                    } else {
-                        printf("[UnitOrderPanel] Cannot afford slave\n");
+
+        std::string unit1 = getBtn1Unit();
+        if (!unit1.empty() && CheckCollisionPointRec(mousePos, btn1)) {
+            if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                if (canAfford(playerFaction, unit1)) {
+                    bool shouldPayNow = false;
+                    if ((*buildings)[selectedBuildingIndex].startProduction(unit1, shouldPayNow)) {
+                        reserveResources(playerFaction, unit1);
+                        if (shouldPayNow) spendResources(playerFaction, unit1);
                     }
-                } else if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
-                    if ((*buildings)[selectedBuildingIndex].cancelLastInQueue()) {
-                        unreserveResources(playerFaction, "slave");
-                        printf("[UnitOrderPanel] Cancelled slave production (unreserved)\n");
-                    }
+                }
+            } else if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+                if ((*buildings)[selectedBuildingIndex].cancelLastInQueue()) {
+                    unreserveResources(playerFaction, unit1);
                 }
             }
         }
     }
-    
-    // Чи панель видима
-    bool isVisible() const {
-        if (selectedBuildingIndex < 0 || !buildings) return false;
-        if (selectedBuildingIndex >= buildings->size()) return false;
-        
-        const Building& selected = (*buildings)[selectedBuildingIndex];
-        
-        // Панель видима тільки для HQ гравця
-        return (selected.type == HQ_ROME || selected.type == HQ_CARTHAGE) && 
-               selected.faction == playerFaction;
-    }
-    
+
 private:
-    // Малювання кнопки Worker
-    void drawWorkerButton() const {
-        const Building& selected = (*buildings)[selectedBuildingIndex];
-        
-        if (selected.type == HQ_ROME || selected.type == HQ_CARTHAGE) {
-            UnitCost cost = getUnitCost("slave");
-            bool canAffordUnit = canAffordWorker();
-            
-            Color buttonColor = canAffordUnit ? BROWN : DARKGRAY;
-            DrawRectangleRec(workerButton, buttonColor);
-            DrawRectangleLines((int)workerButton.x, (int)workerButton.y, (int)workerButton.width, (int)workerButton.height, WHITE);
-            
-            // Іконка (тимчасово текст)
-            DrawText("SLV", 25, 995, 12, WHITE);
-            
-            // Черга (число в куточку)
-            int queueCount = 0;
-            if (selected.is_producing && selected.producing_unit == "slave") queueCount++;
-            for (const auto& queued : selected.production_queue) {
-                if (queued == "slave") queueCount++;
-            }
-            if (queueCount > 0) {
-                DrawCircle(65, 990, 8, RED);
-                DrawText(TextFormat("%d", queueCount), 62, 986, 12, WHITE);
-            }
-            
-            // Вартість
-            DrawText(TextFormat("F:%d M:%d", cost.food, cost.money), 80, 990, 12, WHITE);
+    void drawUnitButton(Rectangle rect, const std::string& unitType) const {
+        if (unitType.empty()) return;
+        const Building& b = (*buildings)[selectedBuildingIndex];
+        UnitCost cost = getUnitCost(unitType);
+        bool affordable = canAfford(playerFaction, unitType);
+
+        const char* label = "???";
+        Color col = DARKGRAY;
+        if (unitType == "slave")      { label = "SLV"; col = affordable ? BROWN    : DARKGRAY; }
+        if (unitType == "legionary")  { label = "LEG"; col = affordable ? Color{139,0,0,255} : DARKGRAY; }
+        if (unitType == "phoenician") { label = "PHO"; col = affordable ? DARKBLUE : DARKGRAY; }
+
+        DrawRectangleRec(rect, col);
+        DrawRectangleLines((int)rect.x, (int)rect.y, (int)rect.width, (int)rect.height, WHITE);
+        DrawText(label, (int)rect.x + 5, (int)rect.y + 10, 12, WHITE);
+
+        // Черга
+        int queueCount = 0;
+        if (b.is_producing && b.producing_unit == unitType) queueCount++;
+        for (const auto& q : b.production_queue) if (q == unitType) queueCount++;
+        if (queueCount > 0) {
+            DrawCircle((int)rect.x + (int)rect.width - 8, (int)rect.y + 8, 8, RED);
+            DrawText(TextFormat("%d", queueCount), (int)rect.x + (int)rect.width - 12, (int)rect.y + 3, 12, WHITE);
         }
-    }
-    
-    // Перевірка чи можна дозволити Worker
-    bool canAffordWorker() const {
-        return canAfford(playerFaction, "slave");
+
+        DrawText(TextFormat("F:%d", cost.food),  (int)rect.x, (int)rect.y + (int)rect.height + 2,  9, YELLOW);
+        DrawText(TextFormat("M:%d", cost.money), (int)rect.x, (int)rect.y + (int)rect.height + 13, 9, YELLOW);
     }
 };
 
