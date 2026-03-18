@@ -962,7 +962,7 @@ void SpawnUnit(const Building& building, const std::string& unitType) {
     
     bool isAI = (building.faction != playerFaction);
     newUnit.init(unitType, building.faction, spawnGrid, isAI);
-    units.push_back(newUnit);
+    units.push_back(std::move(newUnit));
     
     printf("[SPAWN] Unit '%s' spawned at grid(%d, %d)\n", unitType.c_str(), spawnGrid.row, spawnGrid.col);
 }
@@ -1500,7 +1500,7 @@ void DrawFactionSelect() {
             if (spawnPos.row == -1) spawnPos = {10, 10};
             Unit slave;
             slave.init("slave", playerFaction, spawnPos, false);
-            units.push_back(slave);
+            units.push_back(std::move(slave));
             // Фокус камери на рабі
             ScreenCoords sc = CoordinateConverter::gridToScreen(spawnPos);
             mapCamera.target = {sc.x, sc.y};
@@ -1527,7 +1527,7 @@ void DrawFactionSelect() {
             if (spawnPos.row == -1) spawnPos = {10, 10};
             Unit slave;
             slave.init("slave", playerFaction, spawnPos, false);
-            units.push_back(slave);
+            units.push_back(std::move(slave));
             // Фокус камери на рабі
             ScreenCoords sc = CoordinateConverter::gridToScreen(spawnPos);
             mapCamera.target = {sc.x, sc.y};

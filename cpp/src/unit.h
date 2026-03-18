@@ -3,6 +3,7 @@
 #include "building.h" // Для Faction enum
 #include "tilemap/coordinates.h"
 #include "isometric_sprite.h"
+#include "unit_animator.h"
 #include <string>
 #include <cmath>
 
@@ -31,7 +32,8 @@ struct Unit {
     float speed = 0.546875f;     // Швидкість руху
     
     // Isometric sprite system
-    IsometricSprite sprite;      // Спрайт юніта
+    IsometricSprite sprite;      // Статичний спрайт (fallback якщо немає анімацій)
+    UnitAnimator    animator;    // Повна анімаційна система
     bool useDebugRendering;      // Чи використовувати debug режим
     
     // AI поведінка
@@ -93,18 +95,27 @@ struct Unit {
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
         
-        // Спроба завантажити спрайт
-        std::string spritePath = "assets/sprites/isometric/units/" + type + "_";
-        if (unitFaction == ROME) {
-            spritePath += "rome.png";
-        } else {
-            spritePath += "carthage.png";
-        }
-        
-        if (sprite.loadFromFile(spritePath.c_str())) {
+        // Завантажуємо анімації
+        // Шлях: assets/sprites/isometric/units/{type}_{faction}/
+        std::string factionSuffix = (unitFaction == ROME) ? "rome" : "carthage";
+        std::string animBasePath = "assets/sprites/isometric/units/" + type + "_" + factionSuffix;
+
+        // Спочатку пробуємо спрайтшіти (рекомендований формат)
+        animator.loadSheets(animBasePath, 64, 64);
+        // Якщо шітів немає — пробуємо окремі файли
+        if (!animator.loaded) animator.load(animBasePath, 64, 64);
+
+        if (animator.loaded) {
             useDebugRendering = false;
+            TraceLog(LOG_INFO, "[UNIT] Animator loaded for %s_%s", type.c_str(), factionSuffix.c_str());
         } else {
-            TraceLog(LOG_INFO, "[UNIT] Using debug rendering for %s", type.c_str());
+            // Fallback: статичний спрайт (старий формат legionary_rome.png)
+            if (sprite.loadFromFile((animBasePath + ".png").c_str())) {
+                useDebugRendering = false;
+                TraceLog(LOG_INFO, "[UNIT] Static sprite loaded for %s_%s", type.c_str(), factionSuffix.c_str());
+            } else {
+                TraceLog(LOG_INFO, "[UNIT] Using debug rendering for %s_%s", type.c_str(), factionSuffix.c_str());
+            }
         }
         
         // Встановлення характеристик залежно від типу
@@ -189,6 +200,8 @@ struct Unit {
                 float distance = sqrt(dx * dx + dy * dy);
                 
                 if (distance > 0.1f) {
+                    // Оновлюємо аніматор: рух
+                    animator.setState(ANIM_WALK, UnitAnimator::dirFromMovement(dx, dy));
                     float moveDistance = speed * deltaTime * 100.0f;
                     
                     if (moveDistance >= distance) {
@@ -279,6 +292,17 @@ struct Unit {
         
         // COMPATIBILITY: Синхронізуємо screen coordinates після руху
         syncScreenCoords();
+
+        // Оновлюємо стан аніматора
+        if (hp <= 0) {
+            animator.setState(ANIM_DEATH, animator.currentDir);
+        } else if (is_attacking) {
+            animator.setState(ANIM_ATTACK, animator.currentDir);
+        } else if (!is_moving) {
+            animator.setState(ANIM_IDLE, animator.currentDir);
+        }
+        // WALK вже встановлюється всередині блоку руху вище
+        animator.update(GetFrameTime());
     }
     
     // Атакувати ціль
@@ -630,9 +654,14 @@ struct Unit {
         }
         
         // Малювання спрайта або debug shape
-        if (useDebugRendering || !sprite.isLoaded()) {
+        if (useDebugRendering || (!animator.loaded && !sprite.isLoaded())) {
             IsometricSprite::drawDebugUnit(screenPos, unitColor, label);
+        } else if (animator.loaded) {
+            // Нова система: повна анімація
+            Color tint = selected ? Color{220, 220, 150, 255} : WHITE;
+            animator.draw(screenPos, tint);
         } else {
+            // Fallback: статичний спрайт
             sprite.draw(screenPos, WHITE);
         }
         
