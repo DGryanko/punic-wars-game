@@ -7,6 +7,7 @@
 #include "resource.h"
 #include "tilemap/coordinates.h"
 #include "pathfinding.h"
+#include "building_texture_manager.h"
 #include <vector>
 #include <string>
 
@@ -202,32 +203,53 @@ public:
         Color ghostColor = placement.validSpot
             ? Color{0, 255, 0, 120}
             : Color{255, 0, 0, 120};
-
-        // Draw a simple isometric diamond ghost
-        int hw = CoordinateConverter::TILE_WIDTH_HALF * 2;  // 2-tile footprint
-        int hh = CoordinateConverter::TILE_HEIGHT_HALF * 2;
-
-        Vector2 top   = {sc.x,        sc.y - hh};
-        Vector2 right = {sc.x + hw,   sc.y};
-        Vector2 bot   = {sc.x,        sc.y + hh};
-        Vector2 left  = {sc.x - hw,   sc.y};
-
-        DrawTriangle(top, left, bot, ghostColor);
-        DrawTriangle(top, bot, right, ghostColor);
-
-        // Outline
         Color outlineColor = placement.validSpot ? GREEN : RED;
-        DrawLineV(top, right, outlineColor);
-        DrawLineV(right, bot, outlineColor);
-        DrawLineV(bot, left, outlineColor);
-        DrawLineV(left, top, outlineColor);
 
-        // Building name label
+        // Спробуємо намалювати реальний спрайт будівлі
+        BuildingTextureManager& texMgr = BuildingTextureManager::getInstance();
+        bool drewSprite = false;
+        if (texMgr.hasTexture(placement.pendingType)) {
+            Texture2D tex = texMgr.getTexture(placement.pendingType);
+            if (tex.id > 0) {
+                // Визначаємо offset як у Building::init()
+                Vector2 offset = {-192.0f, -128.0f};
+                float drawX = sc.x + offset.x;
+                float drawY = sc.y + offset.y;
+                // Миготіння: sin хвиля між 0.4 і 1.0
+                float pulse = 0.7f + 0.3f * sinf((float)GetTime() * 4.0f);
+                Color tint = placement.validSpot
+                    ? Color{(unsigned char)(0   * pulse), (unsigned char)(255 * pulse), (unsigned char)(0   * pulse), 200}
+                    : Color{(unsigned char)(255 * pulse), (unsigned char)(0   * pulse), (unsigned char)(0   * pulse), 200};
+                Rectangle src  = {0, 0, (float)tex.width, (float)tex.height};
+                Rectangle dest = {drawX, drawY, (float)tex.width, (float)tex.height};
+                DrawTexturePro(tex, src, dest, {0, 0}, 0.0f, tint);
+                drewSprite = true;
+            }
+        }
+
+        // Fallback: ромб якщо спрайту немає
+        if (!drewSprite) {
+            int hw = CoordinateConverter::TILE_WIDTH_HALF * 2;
+            int hh = CoordinateConverter::TILE_HEIGHT_HALF * 2;
+            Vector2 top   = {sc.x,      sc.y - (float)hh};
+            Vector2 right = {sc.x + (float)hw, sc.y};
+            Vector2 bot   = {sc.x,      sc.y + (float)hh};
+            Vector2 left  = {sc.x - (float)hw, sc.y};
+            DrawTriangle(top, left, bot, ghostColor);
+            DrawTriangle(top, bot, right, ghostColor);
+            DrawLineV(top, right, outlineColor);
+            DrawLineV(right, bot, outlineColor);
+            DrawLineV(bot, left, outlineColor);
+            DrawLineV(left, top, outlineColor);
+        }
+
+        // Назва і ціна
         BuildingCost cost = getBuildingCost(placement.pendingType);
         const char* bname = getBuildingName(placement.pendingType);
-        DrawText(bname, (int)sc.x - 30, (int)sc.y - hh - 20, 14, WHITE);
+        int labelY = (int)sc.y - CoordinateConverter::TILE_HEIGHT_HALF * 2 - 20;
+        DrawText(bname, (int)sc.x - 30, labelY, 14, WHITE);
         DrawText(TextFormat("F:%d M:%d", cost.food, cost.money),
-                 (int)sc.x - 30, (int)sc.y - hh - 4, 12, YELLOW);
+                 (int)sc.x - 30, labelY + 16, 12, YELLOW);
     }
 
 private:
