@@ -2208,6 +2208,9 @@ void DrawGame() {
     }
     
     // Кінець режиму 2D камери
+    // Ghost будівлі при placement mode (всередині камери — world coords)
+    if (slaveBuildPanel) slaveBuildPanel->drawGhost();
+
     EndMode2D();
     
     // HUD - панель ресурсів (нова система)
