@@ -250,6 +250,12 @@ class AnimSimulator:
         self.scales = [1, 2, 4, 6]
         self.scale  = 4
 
+        # FPS повзунок
+        self.fps_slider_rect = pygame.Rect(220, 78, 440, 14)
+        self.fps_min = 1
+        self.fps_max = 24
+        self.fps_dragging = False
+
         # Стан
         self.cur_state = "idle"
         self.cur_dir   = "front_left"
@@ -319,6 +325,11 @@ class AnimSimulator:
             b.active = (sv == s)
         self._load_selected()
 
+    def _update_fps_from_mouse(self, mx):
+        r = self.fps_slider_rect
+        t = max(0.0, min(1.0, (mx - r.left) / r.width))
+        self.fps_anim = max(self.fps_min, round(t * (self.fps_max - self.fps_min) + self.fps_min))
+
     def handle_events(self):
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
@@ -348,10 +359,20 @@ class AnimSimulator:
                 for b, s in zip(self.scale_btns, self.scales):
                     if b.hit(e.pos):
                         self._set_scale(s)
+                # FPS повзунок
+                if self.fps_slider_rect.collidepoint(e.pos):
+                    self.fps_dragging = True
+                    self._update_fps_from_mouse(e.pos[0])
+
+            if e.type == pygame.MOUSEBUTTONUP and e.button == 1:
+                self.fps_dragging = False
+
+            if e.type == pygame.MOUSEMOTION and self.fps_dragging:
+                self._update_fps_from_mouse(e.pos[0])
 
             # Колесо миші у зоні перегляду — змінює масштаб
             if e.type == pygame.MOUSEWHEEL:
-                view_rect = pygame.Rect(215, 80, WIN_W - 215, WIN_H - 80)
+                view_rect = pygame.Rect(215, 100, WIN_W - 215, WIN_H - 100)
                 if view_rect.collidepoint(pygame.mouse.get_pos()):
                     idx = self.scales.index(self.scale)
                     new_idx = max(0, min(len(self.scales) - 1, idx + e.y))
@@ -387,8 +408,26 @@ class AnimSimulator:
         # Підписи
         self.screen.blit(self.font_sm.render("Масштаб:", True, DIM_COLOR), (620, 16))
 
+        # FPS повзунок
+        r = self.fps_slider_rect
+        t = (self.fps_anim - self.fps_min) / (self.fps_max - self.fps_min)
+        # Трек
+        pygame.draw.rect(self.screen, FRAME_COLOR, r, border_radius=3)
+        # Заповнення
+        fill_w = max(6, int(r.width * t))
+        pygame.draw.rect(self.screen, (80, 140, 200), (r.x, r.y, fill_w, r.height), border_radius=3)
+        # Ручка
+        hx = r.x + int(r.width * t)
+        pygame.draw.circle(self.screen, SEL_COLOR, (hx, r.centery), 8)
+        pygame.draw.circle(self.screen, (20, 20, 30), (hx, r.centery), 5)
+        # Підписи
+        self.screen.blit(self.font_sm.render(f"{self.fps_min}", True, DIM_COLOR), (r.x - 14, r.y))
+        self.screen.blit(self.font_sm.render(f"{self.fps_max}", True, DIM_COLOR), (r.right + 4, r.y))
+        fps_lbl = self.font_md.render(f"FPS: {self.fps_anim}", True, SEL_COLOR)
+        self.screen.blit(fps_lbl, (r.right + 30, r.y - 2))
+
         # Область перегляду
-        view_rect = pygame.Rect(215, 80, WIN_W - 215, WIN_H - 80)
+        view_rect = pygame.Rect(215, 100, WIN_W - 215, WIN_H - 100)
         pygame.draw.rect(self.screen, (22, 22, 32), view_rect)
 
         cx = view_rect.centerx

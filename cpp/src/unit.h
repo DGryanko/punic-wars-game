@@ -30,6 +30,18 @@ struct Unit {
     bool selected = false;       // Чи вибраний юніт
     bool is_moving = false;      // Чи рухається юніт
     float speed = 0.546875f;     // Швидкість руху
+
+    // Sub-tile позиціонування (9 слотів на тайлі, 3x3)
+    int slot_index = -1;         // Слот на тайлі (-1 = не призначено)
+    ScreenCoords slot_offset = {0, 0}; // Зміщення від центру тайлу
+
+    // Формація та поведінка
+    enum FormationType { FORMATION_NONE=0, FORMATION_LINE=1, FORMATION_SQUARE=2, FORMATION_CHESS=3 };
+    enum BehaviorType  { BEHAVIOR_STAND=0, BEHAVIOR_PASSIVE=1, BEHAVIOR_ACTIVE=2, BEHAVIOR_GUARD=3,
+                         BEHAVIOR_SCOUT=4, BEHAVIOR_SCOUT_ATTACK=5 };
+    FormationType formation = FORMATION_NONE;
+    BehaviorType  behavior  = BEHAVIOR_STAND;
+    bool has_attack_order = false; // Явна команда атаки від гравця (ігнорує STAND/PASSIVE)
     
     // Isometric sprite system
     IsometricSprite sprite;      // Статичний спрайт (fallback якщо немає анімацій)
@@ -91,6 +103,12 @@ struct Unit {
         assigned_resource_position = GridCoords(-1, -1); // NEW
         assigned_dropoff_position = GridCoords(-1, -1); // NEW
         final_destination = startPos; // NEW: Ініціалізація кінцевої цілі
+        slot_index = -1;
+        slot_offset = {0, 0};
+        formation = FORMATION_NONE;
+        has_attack_order = false;
+        // AI юніти за замовчуванням активно атакують, гравець — стоїть
+        behavior = aiControlled ? BEHAVIOR_ACTIVE : BEHAVIOR_STAND;
         
         // COMPATIBILITY: Синхронізуємо screen coordinates
         syncScreenCoords();
@@ -153,9 +171,10 @@ struct Unit {
         target_y = (int)targetScreen.y;
     }
     
-    // Отримати екранну позицію з grid координат
+    // Отримати екранну позицію з grid координат (враховує sub-tile slot offset)
     ScreenCoords getScreenPosition() const {
-        return current_screen_pos;
+        return { current_screen_pos.x + slot_offset.x,
+                 current_screen_pos.y + slot_offset.y };
     }
     
     // Отримати grid позицію
@@ -394,7 +413,8 @@ struct Unit {
     }
     
     // Встановити шлях для pathfinding
-    void setPath(const std::vector<Vector2>& newPath) {
+    // exactGoal — точна screen-ціль (не snap до grid), якщо {0,0} — береться path.back()
+    void setPath(const std::vector<Vector2>& newPath, ScreenCoords exactGoal = {0,0}) {
         if (newPath.empty()) return;
         path = newPath;
         currentWaypointIndex = 0;
@@ -403,10 +423,14 @@ struct Unit {
         // Перший waypoint стає target_position (grid для collision)
         GridCoords firstWp = CoordinateConverter::screenToGrid(ScreenCoords(path[0].x, path[0].y));
         target_position = firstWp;
-        // Точна screen-ціль — остання точка шляху
-        exact_target_screen = ScreenCoords(path.back().x, path.back().y);
-        // Кінцева ціль — остання точка шляху в grid
-        final_destination = CoordinateConverter::screenToGrid(ScreenCoords(path.back().x, path.back().y));
+        // Точна screen-ціль — або передана явно, або остання точка шляху
+        if (exactGoal.x != 0 || exactGoal.y != 0) {
+            exact_target_screen = exactGoal;
+        } else {
+            exact_target_screen = ScreenCoords(path.back().x, path.back().y);
+        }
+        // Кінцева ціль — в grid
+        final_destination = CoordinateConverter::screenToGrid(exact_target_screen);
         syncScreenCoords();
     }
     

@@ -8,6 +8,8 @@
 #include "faction_spawner.h"
 #include "unit_order_panel.h"
 #include "slave_build_panel.h"
+#include "unit_group_panel.h"
+#include "formation_manager.h"
 #include "resource_display.h"
 #include "unit.h"
 #include "resource.h"
@@ -67,6 +69,20 @@ DisplaySettings displaySettings;
 
 // Debug налаштування
 bool showDebugVisuals = false; // Показувати debug візуалізацію (кліки, шляхи)
+bool cheatsEnabled = false;    // Дозвіл на чіт-коди
+
+// Чіт-консоль
+struct CheatConsole {
+    bool active = false;
+    char input[32] = {};
+    int  inputLen  = 0;
+    std::string lastMessage;
+    float messageTimer = 0.0f;
+} cheatConsole;
+
+// UI звуки
+Sound uiClickSound = {0};
+bool uiSoundLoaded = false;
 
 // Глобальні змінні
 GameState currentState = MENU;
@@ -160,6 +176,7 @@ FactionSpawner* factionSpawner = nullptr;
 // UI системи
 UnitOrderPanel* unitOrderPanel = nullptr;
 SlaveBuildPanel* slaveBuildPanel = nullptr;
+UnitGroupPanel* unitGroupPanel = nullptr;
 ResourceDisplay* resourceDisplay = nullptr;
 
 // Система виділення областю
@@ -405,6 +422,7 @@ void SaveSettings() {
     fprintf(f, "music=%.3f\n",         audioSettings.musicVolume);
     fprintf(f, "ambient=%.3f\n",       audioSettings.ambientVolume);
     fprintf(f, "effects=%.3f\n",       audioSettings.effectsVolume);
+    fprintf(f, "cheats=%d\n",          cheatsEnabled ? 1 : 0);
     fclose(f);
 }
 
@@ -417,6 +435,7 @@ void LoadSettings() {
         else if (strcmp(key, "music")      == 0) audioSettings.musicVolume   = val;
         else if (strcmp(key, "ambient")    == 0) audioSettings.ambientVolume = val;
         else if (strcmp(key, "effects")    == 0) audioSettings.effectsVolume = val;
+        else if (strcmp(key, "cheats")     == 0) cheatsEnabled = (val > 0.5f);
     }
     fclose(f);
 }
@@ -612,11 +631,13 @@ void moveUnitWithPathToScreen(Unit& unit, ScreenCoords goalScreen) {
     );
     
     if (!path.empty()) {
-        unit.setPath(path);
+        // Передаємо точну ціль — юніт дійде до goalScreen, а не до snap-нутої grid точки
+        unit.setPath(path, goalScreen);
     } else {
         // Fallback: конвертуємо в grid і рухаємо напряму
         GridCoords gridPos = CoordinateConverter::screenToGrid(goalScreen);
         unit.moveTo(gridPos);
+        unit.exact_target_screen = goalScreen; // зберігаємо точну ціль навіть у fallback
     }
 }
 
@@ -1087,8 +1108,18 @@ void DrawSettings() {
     }
     DrawText("(click markers, unit paths)", sliderX + 40, (int)(startY + spacing * 4) + 5, 16, LIGHTGRAY);
 
+    // Чекбокс чіт-кодів
+    DrawText("Cheat codes:", labelX, startY + spacing * 5, 20, WHITE);
+    Rectangle cheatsCheckRect = {(float)sliderX, startY + spacing * 5, 30, 30};
+    DrawRectangleRec(cheatsCheckRect, DARKGRAY);
+    DrawRectangleLines((int)cheatsCheckRect.x, (int)cheatsCheckRect.y, 30, 30, WHITE);
+    if (cheatsEnabled) {
+        DrawRectangle(sliderX + 5, (int)(startY + spacing * 5) + 5, 20, 20, GOLD);
+    }
+    DrawText("(~ to open console: GOLD, GOODS, QAQC)", sliderX + 40, (int)(startY + spacing * 5) + 5, 16, LIGHTGRAY);
+
     // Кнопка назад відцентрована
-    DynamicButton backButton(0, startY + spacing * 5.5f, "BACK", 20);
+    DynamicButton backButton(0, startY + spacing * 6.5f, "BACK", 20);
     backButton.bounds.x = (screenW - backButton.bounds.width) / 2.0f;
     Vector2 mousePos = GetMousePosition();
     backButton.Update(mousePos);
@@ -1125,6 +1156,12 @@ void DrawSettings() {
     // Обробка чекбоксу debug візуалізації
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, debugCheckRect)) {
         showDebugVisuals = !showDebugVisuals;
+    }
+
+    // Обробка чекбоксу чіт-кодів
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, cheatsCheckRect)) {
+        cheatsEnabled = !cheatsEnabled;
+        SaveSettings();
     }
     
     // Обробка кнопки назад
@@ -1598,24 +1635,31 @@ void HandleClicks() {
     // Спочатку перевіряємо клік по панелі замовлення юнітів (UI координати, без камери)
     if (unitOrderPanel && unitOrderPanel->isVisible()) {
         unitOrderPanel->handleClick(mousePos);
-        // Якщо клік був на панелі, не обробляємо далі
         Rectangle panelRect = {10, 950, 300, 100};
         if (CheckCollisionPointRec(mousePos, panelRect)) {
             return;
         }
     }
-    
+
     // Перевіряємо клік по панелі будівництва рабом
     if (slaveBuildPanel && slaveBuildPanel->isVisible()) {
         slaveBuildPanel->handleClick(mousePos);
-        // Якщо клік був на панелі, не обробляємо далі
         Rectangle panelRect = {10, 930, 500, 120};
         if (CheckCollisionPointRec(mousePos, panelRect)) {
             return;
         }
     }
-    
+
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        // Перевіряємо клік по панелі команд групи
+        if (unitGroupPanel && unitGroupPanel->isVisible(units, playerFaction)) {
+            Rectangle gpr = unitGroupPanel->getPanelRect();
+            if (CheckCollisionPointRec(mousePos, gpr)) {
+                bool consumed = unitGroupPanel->handleClick(mousePos, units, playerFaction);
+                if (consumed && uiSoundLoaded) PlaySound(uiClickSound);
+                return;
+            }
+        }
         
         // DEBUG: Зберігаємо клік для візуалізації
         debugClicks.push_back(worldMousePos);
@@ -1756,6 +1800,7 @@ void HandleClicks() {
                             // Рухаємося до grid позиції ворога
                             unit.moveTo(units[i].getGridPosition());
                             unit.target_unit_id = i;
+                            unit.has_attack_order = true; // явна команда — ігнорує STAND/PASSIVE
                         }
                     }
                     foundEnemy = true;
@@ -1817,21 +1862,48 @@ void HandleClicks() {
                     // Знаходимо найближчий прохідний тайл (якщо клікнули на будівлю)
                     GridCoords targetGrid = findNearestWalkableTile(gridPos);
                     
-                    // Рухаємо юніти до точних world координат кліку (якщо тайл вільний)
-                    // або до найближчого вільного тайлу
-                    bool useExactPos = (targetGrid.row == gridPos.row && targetGrid.col == gridPos.col);
-                    
-                    for (int i = 0; i < units.size(); i++) {
-                        if (units[i].selected && units[i].faction == playerFaction) {
-                            units[i].moveToByPlayer(targetGrid);
-                            units[i].target_unit_id = -1;
-                            if (useExactPos) {
-                                moveUnitWithPathToScreen(units[i], {worldMousePos.x, worldMousePos.y});
-                            } else {
-                                moveUnitWithPath(units[i], targetGrid);
-                            }
-                            printf("[MOVE] Unit %d moving to world(%.1f,%.1f)\n", i, worldMousePos.x, worldMousePos.y);
+                    // Збираємо вибрані юніти
+                    std::vector<int> selectedIdx;
+                    for (int i = 0; i < (int)units.size(); i++) {
+                        if (units[i].selected && units[i].faction == playerFaction)
+                            selectedIdx.push_back(i);
+                    }
+
+                    if (!selectedIdx.empty()) {
+                        // Визначаємо формацію (беремо від першого вибраного)
+                        Unit::FormationType form = units[selectedIdx[0]].formation;
+                        std::string utype = units[selectedIdx[0]].unit_type;
+
+                        // Для легіонерів без явної формації — автоматично шеренга
+                        if (form == Unit::FORMATION_NONE &&
+                            (utype == "legionary" || utype == "phoenician") &&
+                            selectedIdx.size() > 1) {
+                            form = Unit::FORMATION_LINE;
                         }
+
+                        // Генеруємо цілі для кожного юніта
+                        ScreenCoords clickScreen = { worldMousePos.x, worldMousePos.y };
+                        std::vector<ScreenCoords> targets = buildFormationTargets(
+                            clickScreen, form, (int)selectedIdx.size(), utype);
+
+                        for (int k = 0; k < (int)selectedIdx.size(); k++) {
+                            Unit& unit = units[selectedIdx[k]];
+                            unit.target_unit_id = -1;
+                            unit.slot_index = -1; // скидаємо grid-слот, але offset зберігаємо під час руху
+
+                            ScreenCoords goal = (k < (int)targets.size()) ? targets[k] : clickScreen;
+
+                            // Призначаємо slot_offset одразу — юніт рухається до своєї унікальної точки
+                            // Offset = різниця між його ціллю і центром групи (вже вбудована в goal)
+                            // Тому slot_offset = 0 під час руху (кожен іде до своєї точки)
+                            unit.slot_offset = {0, 0};
+                            // Скасовуємо призначення ресурсу (як moveToByPlayer)
+                            if (unit.has_assigned_resource) unit.clearResourceAssignment();
+
+                            moveUnitWithPathToScreen(unit, goal);
+                        }
+                        printf("[MOVE] %d units moving in formation %d\n",
+                               (int)selectedIdx.size(), (int)form);
                     }
                     // Маркер руху (жовтий)
                     moveMarkers.push_back({worldMousePos, 1.0f, false, false});
@@ -1847,7 +1919,7 @@ void DrawGame() {
     ClearBackground({34, 85, 34, 255});
     
     // Обробка ESC - повернення в меню
-    if (IsKeyPressed(KEY_ESCAPE)) {
+    if (IsKeyPressed(KEY_ESCAPE) && !cheatConsole.active) {
         currentState = MENU;
         // Повертаємось до меню музики
         if (audioInitialized) {
@@ -1988,82 +2060,165 @@ void DrawGame() {
         
         // Оновлюємо юніт з перевіркою колізій
         units[i].update(&buildings);
+
+        // Sub-tile slot: призначаємо слот коли юніт зупинився
+        if (!units[i].is_moving && units[i].slot_index < 0) {
+            assignSlot(units[i], units, i);
+        }
+        // Під час руху slot_index = -1, slot_offset = {0,0} (кожен іде до своєї точки)
+        // Звільняємо grid-слот тільки якщо юніт починає рухатися
+        if (units[i].is_moving && units[i].slot_index >= 0) {
+            units[i].slot_index = -1;
+            units[i].slot_offset = {0, 0};
+        }
         
-        // Бойова логіка - пошук ворогів поблизу та переслідування
+        // Бойова логіка — залежить від behavior юніта
         if (units[i].attack_damage > 0 && !units[i].is_harvesting) {
-            // Радіус агресії в пікселях (5 тайлів ≈ 5 * 64 = 320 пікселів по ширині)
-            const float AGGRO_RANGE_PX = 320.0f;
-            
+            const float AGGRO_RANGE_PX  = 320.0f; // 5 тайлів
+
             ScreenCoords myScreen = units[i].getScreenPosition();
-            
-            // Знаходимо найближчого ворожого юніта в радіусі агресії
-            // Використовуємо current_screen_pos щоб бачити юнітів що рухаються
-            int nearestEnemy = -1;
-            float nearestDist = AGGRO_RANGE_PX + 1.0f;
-            
-            for (int j = 0; j < (int)units.size(); j++) {
-                if (i == j || units[i].faction == units[j].faction) continue;
-                ScreenCoords enemyScreen = units[j].getScreenPosition();
-                float pixDist = sqrt(pow(myScreen.x - enemyScreen.x, 2) +
-                                     pow(myScreen.y - enemyScreen.y, 2));
-                if (pixDist < nearestDist) {
-                    nearestDist = pixDist;
-                    nearestEnemy = j;
+            Unit::BehaviorType beh = units[i].behavior;
+
+            // ── Явна команда атаки від гравця (ігнорує STAND/PASSIVE) ───────
+            if (units[i].has_attack_order && units[i].target_unit_id >= 0) {
+                int ti = units[i].target_unit_id;
+                if (ti < (int)units.size() && !units[ti].isDead()) {
+                    ScreenCoords es = units[ti].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d <= units[i].attack_range) {
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        units[i].attackTarget(units[ti]);
+                    } else {
+                        GridCoords eg = units[ti].getGridPosition();
+                        if (!units[i].is_moving || !(units[i].final_destination == eg))
+                            moveUnitWithPath(units[i], eg);
+                    }
+                } else {
+                    units[i].has_attack_order = false;
+                    units[i].target_unit_id = -1;
                 }
             }
-            
-            if (nearestEnemy >= 0) {
-                ScreenCoords enemyScreen = units[nearestEnemy].getScreenPosition();
-                float pixelDist = sqrt(pow(myScreen.x - enemyScreen.x, 2) +
-                                       pow(myScreen.y - enemyScreen.y, 2));
-                
-                if (pixelDist <= units[i].attack_range) {
-                    // В радіусі — атакуємо, зупиняємо рух
-                    units[i].clearPath();
-                    units[i].is_moving = false;
-                    units[i].attackTarget(units[nearestEnemy]);
-                } else {
-                    // Не в радіусі — переслідуємо по поточній екранній позиції ворога
-                    GridCoords enemyGrid = units[nearestEnemy].getGridPosition();
-                    if (!units[i].is_moving || !(units[i].final_destination == enemyGrid)) {
-                        moveUnitWithPath(units[i], enemyGrid);
+            // ── STAND: не рухається, не атакує ──────────────────────────────
+            else if (beh == Unit::BEHAVIOR_STAND) {
+                // Нічого не робимо — юніт стоїть на місці
+            }
+            // ── PASSIVE: атакує тільки якщо ворог впритул (attack_range*2), не переслідує ──
+            else if (beh == Unit::BEHAVIOR_PASSIVE) {
+                for (int j = 0; j < (int)units.size(); j++) {
+                    if (units[i].faction == units[j].faction) continue;
+                    ScreenCoords es = units[j].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d <= units[i].attack_range * 2.0f) {
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        units[i].attackTarget(units[j]);
+                        break;
                     }
                 }
-            } else {
-                // Немає ворожих юнітів — шукаємо ворожі будівлі в радіусі агресії
-                int nearestEnemyBuilding = -1;
-                float nearestBuildingDist = AGGRO_RANGE_PX + 1.0f;
-                for (int b = 0; b < (int)buildings.size(); b++) {
-                    if (buildings[b].faction == units[i].faction) continue;
-                    ScreenCoords bScreen = buildings[b].getScreenPosition();
-                    float pixDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
-                                         pow(myScreen.y - bScreen.y, 2));
-                    if (pixDist < nearestBuildingDist) {
-                        nearestBuildingDist = pixDist;
-                        nearestEnemyBuilding = b;
-                    }
+            }
+            // ── ACTIVE: атакує ворогів в радіусі агресії, переслідує ────────
+            else if (beh == Unit::BEHAVIOR_ACTIVE || beh == Unit::BEHAVIOR_GUARD) {
+                // GUARD поки що = ACTIVE (охорона об'єкта — розширення в майбутньому)
+                int nearestEnemy = -1;
+                float nearestDist = AGGRO_RANGE_PX + 1.0f;
+                for (int j = 0; j < (int)units.size(); j++) {
+                    if (i == j || units[i].faction == units[j].faction) continue;
+                    ScreenCoords es = units[j].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d < nearestDist) { nearestDist = d; nearestEnemy = j; }
                 }
-                if (nearestEnemyBuilding >= 0) {
-                    ScreenCoords bScreen = buildings[nearestEnemyBuilding].getScreenPosition();
-                    float pixelDist = sqrt(pow(myScreen.x - bScreen.x, 2) +
-                                           pow(myScreen.y - bScreen.y, 2));
-                    float currentTime = GetTime();
-                    // Атакуємо будівлю якщо в межах attack_range * 5 (будівлі великі)
-                    const float BUILD_ATTACK_RANGE = units[i].attack_range * 5.0f;
-                    if (pixelDist <= BUILD_ATTACK_RANGE) {
-                        // НЕ виставляємо is_attacking=true щоб не блокувати рух
-                        if (currentTime - units[i].last_attack_time >= units[i].attack_cooldown) {
-                            buildings[nearestEnemyBuilding].takeDamage(units[i].attack_damage);
-                            units[i].last_attack_time = currentTime;
-                        }
+                if (nearestEnemy >= 0) {
+                    ScreenCoords es = units[nearestEnemy].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d <= units[i].attack_range) {
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        units[i].attackTarget(units[nearestEnemy]);
                     } else {
-                        // Переслідуємо будівлю — йдемо до найближчого прохідного тайлу поруч
-                        GridCoords bGrid = buildings[nearestEnemyBuilding].getGridPosition();
-                        GridCoords walkable = findNearestWalkableTile(bGrid);
-                        if (!units[i].is_moving || !(units[i].final_destination == walkable)) {
-                            moveUnitWithPath(units[i], walkable);
+                        GridCoords eg = units[nearestEnemy].getGridPosition();
+                        if (!units[i].is_moving || !(units[i].final_destination == eg))
+                            moveUnitWithPath(units[i], eg);
+                    }
+                } else {
+                    // Ворожі будівлі
+                    int nearestEB = -1; float nearestBD = AGGRO_RANGE_PX + 1.0f;
+                    for (int b = 0; b < (int)buildings.size(); b++) {
+                        if (buildings[b].faction == units[i].faction) continue;
+                        ScreenCoords bs = buildings[b].getScreenPosition();
+                        float d = sqrt(pow(myScreen.x-bs.x,2)+pow(myScreen.y-bs.y,2));
+                        if (d < nearestBD) { nearestBD = d; nearestEB = b; }
+                    }
+                    if (nearestEB >= 0) {
+                        ScreenCoords bs = buildings[nearestEB].getScreenPosition();
+                        float d = sqrt(pow(myScreen.x-bs.x,2)+pow(myScreen.y-bs.y,2));
+                        float currentTime = GetTime();
+                        const float BUILD_ATTACK_RANGE = units[i].attack_range * 5.0f;
+                        if (d <= BUILD_ATTACK_RANGE) {
+                            if (currentTime - units[i].last_attack_time >= units[i].attack_cooldown) {
+                                buildings[nearestEB].takeDamage(units[i].attack_damage);
+                                units[i].last_attack_time = currentTime;
+                            }
+                        } else {
+                            GridCoords bGrid = buildings[nearestEB].getGridPosition();
+                            GridCoords walkable = findNearestWalkableTile(bGrid);
+                            if (!units[i].is_moving || !(units[i].final_destination == walkable))
+                                moveUnitWithPath(units[i], walkable);
                         }
                     }
+                }
+            }
+            // ── SCOUT: блукає по карті, зупиняється при першому ворогові ────
+            else if (beh == Unit::BEHAVIOR_SCOUT) {
+                // Перевіряємо чи є ворог поблизу
+                bool foundEnemy = false;
+                for (int j = 0; j < (int)units.size(); j++) {
+                    if (units[i].faction == units[j].faction) continue;
+                    ScreenCoords es = units[j].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d <= AGGRO_RANGE_PX) {
+                        // Знайшов ворога — зупиняємось, переходимо в STAND
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        units[i].behavior = Unit::BEHAVIOR_STAND;
+                        foundEnemy = true;
+                        break;
+                    }
+                }
+                // Якщо не знайшов і не рухається — рухаємось в випадковому напрямку
+                if (!foundEnemy && !units[i].is_moving) {
+                    int rr = rand() % 80;
+                    int rc = rand() % 80;
+                    moveUnitWithPath(units[i], GridCoords(rr, rc));
+                }
+            }
+            // ── SCOUT_ATTACK: блукає, атакує всіх ворогів ───────────────────
+            else if (beh == Unit::BEHAVIOR_SCOUT_ATTACK) {
+                int nearestEnemy = -1;
+                float nearestDist = AGGRO_RANGE_PX + 1.0f;
+                for (int j = 0; j < (int)units.size(); j++) {
+                    if (i == j || units[i].faction == units[j].faction) continue;
+                    ScreenCoords es = units[j].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d < nearestDist) { nearestDist = d; nearestEnemy = j; }
+                }
+                if (nearestEnemy >= 0) {
+                    ScreenCoords es = units[nearestEnemy].getScreenPosition();
+                    float d = sqrt(pow(myScreen.x-es.x,2)+pow(myScreen.y-es.y,2));
+                    if (d <= units[i].attack_range) {
+                        units[i].clearPath();
+                        units[i].is_moving = false;
+                        units[i].attackTarget(units[nearestEnemy]);
+                    } else {
+                        GridCoords eg = units[nearestEnemy].getGridPosition();
+                        if (!units[i].is_moving || !(units[i].final_destination == eg))
+                            moveUnitWithPath(units[i], eg);
+                    }
+                } else if (!units[i].is_moving) {
+                    // Немає ворогів поблизу — продовжуємо блукати
+                    int rr = rand() % 80;
+                    int rc = rand() % 80;
+                    moveUnitWithPath(units[i], GridCoords(rr, rc));
                 }
             }
         }
@@ -2330,6 +2485,20 @@ void DrawGame() {
     if (slaveBuildPanel) {
         slaveBuildPanel->draw();
     }
+
+    // Панель команд групи (показується коли вибрано юніт(и) гравця)
+    if (unitGroupPanel && unitGroupPanel->isVisible(units, playerFaction)) {
+        // Не показуємо якщо вибрана будівля або раб-будівельник (у них своя панель)
+        bool showGroup = true;
+        if (selectedBuildingIndex >= 0) showGroup = false;
+        if (showGroup && slaveBuildPanel && slaveBuildPanel->isVisible()) {
+            // Раб вибраний — показуємо обидві панелі (slave build + group)
+            // але зміщуємо group panel вгору
+        }
+        if (showGroup) {
+            unitGroupPanel->draw(units, playerFaction);
+        }
+    }
     
     // Малювання курсора
     DrawCustomCursor();
@@ -2347,9 +2516,102 @@ void DrawGame() {
     
     // Інструкції
     DrawText("LMB - Select | RMB - Move/Attack/Harvest | Drag - Area | 2xClick - All type", 10, 1040, 14, LIGHTGRAY);
+
+    // ── Чіт-консоль ─────────────────────────────────────────────────────────
+    if (cheatsEnabled) {
+        // Тригер: ~ (KEY_GRAVE) відкриває/закриває консоль
+        if (IsKeyPressed(KEY_GRAVE)) {
+            cheatConsole.active = !cheatConsole.active;
+            cheatConsole.inputLen = 0;
+            memset(cheatConsole.input, 0, sizeof(cheatConsole.input));
+        }
+
+        if (cheatConsole.active) {
+            // Збираємо символи (тільки літери)
+            int ch = GetCharPressed();
+            while (ch > 0) {
+                if (ch >= 32 && ch < 127 && cheatConsole.inputLen < 30) {
+                    cheatConsole.input[cheatConsole.inputLen++] = (char)toupper(ch);
+                    cheatConsole.input[cheatConsole.inputLen] = '\0';
+                }
+                ch = GetCharPressed();
+            }
+            // Backspace
+            if (IsKeyPressed(KEY_BACKSPACE) && cheatConsole.inputLen > 0) {
+                cheatConsole.input[--cheatConsole.inputLen] = '\0';
+            }
+            // Enter — виконати
+            if (IsKeyPressed(KEY_ENTER)) {
+                std::string cmd(cheatConsole.input);
+                if (cmd == "GOLD") {
+                    if (playerFaction == ROME) rome_money  = std::min(rome_money  + 1000, rome_money_cap);
+                    else                       carth_money = std::min(carth_money + 1000, carth_money_cap);
+                    cheatConsole.lastMessage = "+1000 gold";
+                } else if (cmd == "GOODS") {
+                    if (playerFaction == ROME) rome_food  = std::min(rome_food  + 1000, rome_food_cap);
+                    else                       carth_food = std::min(carth_food + 1000, carth_food_cap);
+                    cheatConsole.lastMessage = "+1000 food";
+                } else if (cmd == "QAQC") {
+                    if (playerFaction == ROME) {
+                        rome_money = std::min(rome_money + 1000, rome_money_cap);
+                        rome_food  = std::min(rome_food  + 1000, rome_food_cap);
+                    } else {
+                        carth_money = std::min(carth_money + 1000, carth_money_cap);
+                        carth_food  = std::min(carth_food  + 1000, carth_food_cap);
+                    }
+                    // Миттєве виробництво
+                    for (auto& b : buildings) {
+                        if (b.faction == playerFaction && b.is_producing) {
+                            b.production_progress = b.production_time; // завершити одразу
+                        }
+                    }
+                    cheatConsole.lastMessage = "+1000 gold & food, instant build";
+                } else {
+                    cheatConsole.lastMessage = "Unknown: " + cmd;
+                }
+                cheatConsole.messageTimer = 3.0f;
+                cheatConsole.inputLen = 0;
+                memset(cheatConsole.input, 0, sizeof(cheatConsole.input));
+                cheatConsole.active = false;
+            }
+            // Escape — закрити без виконання
+            if (IsKeyPressed(KEY_ESCAPE)) {
+                cheatConsole.active = false;
+                cheatConsole.inputLen = 0;
+                memset(cheatConsole.input, 0, sizeof(cheatConsole.input));
+            }
+
+            // Малюємо консоль
+            int cw = 400, ch2 = 50;
+            int cx = (GetScreenWidth() - cw) / 2;
+            int cy = GetScreenHeight() / 2 - 60;
+            DrawRectangle(cx, cy, cw, ch2, {0, 0, 0, 220});
+            DrawRectangleLines(cx, cy, cw, ch2, GOLD);
+            DrawText("CHEAT:", cx + 10, cy + 8, 20, GOLD);
+            DrawText(cheatConsole.input, cx + 90, cy + 8, 20, WHITE);
+            // Курсор, що блимає
+            if ((int)(GetTime() * 2) % 2 == 0) {
+                int tw = MeasureText(cheatConsole.input, 20);
+                DrawText("|", cx + 90 + tw, cy + 8, 20, WHITE);
+            }
+            DrawText("Enter - apply  Esc - cancel", cx + 10, cy + 30, 12, LIGHTGRAY);
+        }
+
+        // Повідомлення про результат
+        if (cheatConsole.messageTimer > 0) {
+            cheatConsole.messageTimer -= GetFrameTime();
+            int tw = MeasureText(cheatConsole.lastMessage.c_str(), 20);
+            int mx = (GetScreenWidth() - tw) / 2;
+            DrawRectangle(mx - 10, GetScreenHeight()/2 - 20, tw + 20, 30, {0,0,0,180});
+            DrawText(cheatConsole.lastMessage.c_str(), mx, GetScreenHeight()/2 - 15, 20, GOLD);
+        }
+
+        // Підказка
+        DrawText("[~] Cheats", GetScreenWidth() - 120, 35, 14, {180, 150, 50, 200});
+    }
     
     // Перевірка виходу в меню паузи (залишаємо Escape як альтернативу)
-    if (IsKeyPressed(KEY_ESCAPE)) {
+    if (IsKeyPressed(KEY_ESCAPE) && !cheatConsole.active) {
         currentState = PAUSE_MENU;
     }
 }
@@ -2407,7 +2669,26 @@ int main() {
     
     // Ініціалізація аудіо
     InitAudioDevice();
-    
+
+    // Генерація UI click звуку (дерев'яний стук, ~40ms)
+    {
+        const int SAMPLE_RATE = 44100;
+        const float DURATION  = 0.04f;
+        const int SAMPLES     = (int)(SAMPLE_RATE * DURATION);
+        short* data = (short*)MemAlloc(SAMPLES * sizeof(short));
+        for (int i = 0; i < SAMPLES; i++) {
+            float t    = (float)i / SAMPLE_RATE;
+            float env  = expf(-t * 80.0f);                      // швидке загасання
+            float tone = sinf(2.0f * PI * 320.0f * t);          // ~320 Hz — тупий стук
+            float noise = ((float)(rand() % 2001 - 1000) / 1000.0f) * 0.15f;
+            data[i] = (short)((tone * 0.7f + noise) * env * 28000.0f);
+        }
+        Wave w = { (unsigned int)SAMPLES, (unsigned int)SAMPLE_RATE, 16, 1, data };
+        uiClickSound  = LoadSoundFromWave(w);
+        uiSoundLoaded = (uiClickSound.stream.buffer != nullptr);
+        MemFree(data);
+    }
+
     // Завантаження музики
     menuMusic = LoadMusicStream("assets/sounds/Punic wars_ Castra.mp3");
     ambientMusic[0] = LoadMusicStream("assets/sounds/Punic wars_ Castra Ambient.mp3");
@@ -2540,6 +2821,9 @@ int main() {
     
     slaveBuildPanel = new SlaveBuildPanel();
     slaveBuildPanel->init(&units, &buildings, playerFaction);
+
+    unitGroupPanel = new UnitGroupPanel();
+    unitGroupPanel->loadSprites();
     
     resourceDisplay = new ResourceDisplay();
     resourceDisplay->init(resourcePanel, playerFaction);
@@ -2657,7 +2941,9 @@ int main() {
     if (factionSpawner) delete factionSpawner;
     if (unitOrderPanel) delete unitOrderPanel;
     if (slaveBuildPanel) delete slaveBuildPanel;
+    if (unitGroupPanel) { unitGroupPanel->unloadSprites(); delete unitGroupPanel; }
     if (resourceDisplay) delete resourceDisplay;
+    if (uiSoundLoaded) UnloadSound(uiClickSound);
     
     CloseAudioDevice();
     
