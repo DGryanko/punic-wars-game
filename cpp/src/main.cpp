@@ -1,4 +1,6 @@
 #include "raylib.h"
+#include <algorithm>
+#include <cstring>
 #include "building.h"
 #include "building_texture_manager.h"
 #include "building_renderer.h"
@@ -168,6 +170,15 @@ Vector2 dragEnd = {0, 0};
 // DEBUG: Останні кліки для візуалізації
 std::vector<Vector2> debugClicks;
 const int MAX_DEBUG_CLICKS = 10;
+
+// Маркери руху (жовтий = рух, червоний = атака)
+struct MoveMarker {
+    Vector2 pos;
+    float   timer;
+    bool    isAttack;   // червоний
+    bool    isHarvest;  // зелений
+};
+std::vector<MoveMarker> moveMarkers;
 
 // Система подвійного кліку
 float lastClickTime = 0.0f;
@@ -367,28 +378,47 @@ void UpdateGameMusic() {
 // Функція для перемикання псевдоповноекранного режиму
 void ToggleWindowedFullscreen() {
     if (!displaySettings.isWindowedFullscreen) {
-        // Переходимо в псевдоповноекранний режим
         displaySettings.savedX = GetWindowPosition().x;
         displaySettings.savedY = GetWindowPosition().y;
-        
         int monitorWidth = GetMonitorWidth(GetCurrentMonitor());
         int monitorHeight = GetMonitorHeight(GetCurrentMonitor());
-        
         SetWindowState(FLAG_WINDOW_UNDECORATED);
         SetWindowPosition(0, 0);
         SetWindowSize(monitorWidth, monitorHeight);
-        
         displaySettings.isWindowedFullscreen = true;
         LOG_BUILDING("[DISPLAY] Switched to windowed fullscreen: %dx%d\n", monitorWidth, monitorHeight);
     } else {
-        // Повертаємось у віконний режим
         ClearWindowState(FLAG_WINDOW_UNDECORATED);
         SetWindowSize(displaySettings.windowWidth, displaySettings.windowHeight);
         SetWindowPosition(displaySettings.savedX, displaySettings.savedY);
-        
         displaySettings.isWindowedFullscreen = false;
         LOG_BUILDING("[DISPLAY] Switched to windowed mode: %dx%d\n", displaySettings.windowWidth, displaySettings.windowHeight);
     }
+}
+
+static const char* SETTINGS_FILE = "settings.ini";
+
+void SaveSettings() {
+    FILE* f = fopen(SETTINGS_FILE, "w");
+    if (!f) return;
+    fprintf(f, "fullscreen=%d\n",      displaySettings.isWindowedFullscreen ? 1 : 0);
+    fprintf(f, "music=%.3f\n",         audioSettings.musicVolume);
+    fprintf(f, "ambient=%.3f\n",       audioSettings.ambientVolume);
+    fprintf(f, "effects=%.3f\n",       audioSettings.effectsVolume);
+    fclose(f);
+}
+
+void LoadSettings() {
+    FILE* f = fopen(SETTINGS_FILE, "r");
+    if (!f) return;
+    char key[32]; float val;
+    while (fscanf(f, "%31[^=]=%f\n", key, &val) == 2) {
+        if      (strcmp(key, "fullscreen") == 0) displaySettings.isWindowedFullscreen = (val > 0.5f);
+        else if (strcmp(key, "music")      == 0) audioSettings.musicVolume   = val;
+        else if (strcmp(key, "ambient")    == 0) audioSettings.ambientVolume = val;
+        else if (strcmp(key, "effects")    == 0) audioSettings.effectsVolume = val;
+    }
+    fclose(f);
 }
 
 // Функції для роботи з ресурсами
@@ -1089,6 +1119,7 @@ void DrawSettings() {
     // Обробка чекбоксу повноекранного режиму
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mousePos, checkboxRect)) {
         ToggleWindowedFullscreen();
+        SaveSettings();
     }
 
     // Обробка чекбоксу debug візуалізації
@@ -1098,7 +1129,8 @@ void DrawSettings() {
     
     // Обробка кнопки назад
     if (backButton.IsClicked()) {
-        currentState = returnFromSettings;  // Повертаємось туди звідки прийшли
+        SaveSettings();
+        currentState = returnFromSettings;
     }
     
     // Малювання курсора
@@ -1727,6 +1759,9 @@ void HandleClicks() {
                         }
                     }
                     foundEnemy = true;
+                    // Маркер атаки (червоний)
+                    ScreenCoords esc = units[i].getScreenPosition();
+                    moveMarkers.push_back({Vector2{esc.x, esc.y}, 1.0f, true, false});
                     break;
                 }
             }
@@ -1770,6 +1805,9 @@ void HandleClicks() {
                             }
                         }
                         foundResource = true;
+                        // Маркер збору (зелений)
+                        ScreenCoords rsc = resources[i].getScreenPosition();
+                        moveMarkers.push_back({Vector2{rsc.x, rsc.y}, 1.0f, false, true});
                         break;
                     }
                 }
@@ -1788,7 +1826,6 @@ void HandleClicks() {
                             units[i].moveToByPlayer(targetGrid);
                             units[i].target_unit_id = -1;
                             if (useExactPos) {
-                                // Рухаємо до точних world координат кліку
                                 moveUnitWithPathToScreen(units[i], {worldMousePos.x, worldMousePos.y});
                             } else {
                                 moveUnitWithPath(units[i], targetGrid);
@@ -1796,6 +1833,8 @@ void HandleClicks() {
                             printf("[MOVE] Unit %d moving to world(%.1f,%.1f)\n", i, worldMousePos.x, worldMousePos.y);
                         }
                     }
+                    // Маркер руху (жовтий)
+                    moveMarkers.push_back({worldMousePos, 1.0f, false, false});
                 }
             }
         }
@@ -2211,6 +2250,23 @@ void DrawGame() {
     // Ghost будівлі при placement mode (всередині камери — world coords)
     if (slaveBuildPanel) slaveBuildPanel->drawGhost();
 
+    // Маркери руху — кружечки що зменшуються
+    float dt = GetFrameTime();
+    for (auto& m : moveMarkers) m.timer -= dt * 0.8f; // ~1.25 сек
+    moveMarkers.erase(
+        std::remove_if(moveMarkers.begin(), moveMarkers.end(),
+                       [](const MoveMarker& m){ return m.timer <= 0.0f; }),
+        moveMarkers.end());
+    for (const auto& m : moveMarkers) {
+        float r = m.timer * 24.0f;
+        unsigned char alpha = (unsigned char)(m.timer * 220.0f);
+        Color c = m.isAttack   ? Color{255, 60,  60,  alpha}
+                : m.isHarvest  ? Color{60,  220, 60,  alpha}
+                               : Color{255, 220, 0,   alpha};
+        DrawCircleLines((int)m.pos.x, (int)m.pos.y, r, c);
+        DrawCircleLines((int)m.pos.x, (int)m.pos.y, r * 0.5f, c);
+    }
+
     EndMode2D();
     
     // HUD - панель ресурсів (нова система)
@@ -2304,8 +2360,50 @@ int main() {
     const int screenHeight = 1075; // 768 * 1.4
     
     InitWindow(screenWidth, screenHeight, "Punic Wars: Castra");
-    SetExitKey(0); // Вимикаємо автоматичне закриття на Escape
+    SetExitKey(0);
     SetTargetFPS(60);
+
+    // Завантажуємо збережені налаштування і одразу застосовуємо fullscreen
+    LoadSettings();
+    if (displaySettings.isWindowedFullscreen) {
+        displaySettings.isWindowedFullscreen = false;
+        int monitorWidth  = GetMonitorWidth(GetCurrentMonitor());
+        int monitorHeight = GetMonitorHeight(GetCurrentMonitor());
+        displaySettings.savedX = (monitorWidth  - displaySettings.windowWidth)  / 2;
+        displaySettings.savedY = (monitorHeight - displaySettings.windowHeight) / 2;
+        SetWindowState(FLAG_WINDOW_UNDECORATED);
+        SetWindowPosition(0, 0);
+        SetWindowSize(monitorWidth, monitorHeight);
+        displaySettings.isWindowedFullscreen = true;
+    }
+
+    // ── Splash screen ────────────────────────────────────────────────────────
+    // Малюємо заставку одразу, ще до завантаження решти ресурсів
+    {
+        Texture2D splash = LoadTexture("assets/Background.png");
+        BeginDrawing();
+        ClearBackground(BLACK);
+        if (splash.id > 0) {
+            int sw = GetScreenWidth(), sh = GetScreenHeight();
+            float scale = fmaxf((float)sw / splash.width, (float)sh / splash.height);
+            int dw = (int)(splash.width  * scale);
+            int dh = (int)(splash.height * scale);
+            DrawTexturePro(splash,
+                {0, 0, (float)splash.width, (float)splash.height},
+                {(sw - dw) * 0.5f, (sh - dh) * 0.5f, (float)dw, (float)dh},
+                {0, 0}, 0.0f, WHITE);
+        }
+        // Напис "Loading..."
+        const char* loadingText = "Loading...";
+        int fontSize = 28;
+        int tw = MeasureText(loadingText, fontSize);
+        int sh2 = GetScreenHeight(), sw2 = GetScreenWidth();
+        DrawRectangle(0, sh2 - 60, sw2, 60, {0, 0, 0, 160});
+        DrawText(loadingText, sw2 / 2 - tw / 2, sh2 - 40, fontSize, {200, 200, 200, 255});
+        EndDrawing();
+        if (splash.id > 0) UnloadTexture(splash);
+    }
+    // ────────────────────────────────────────────────────────────────────────
     
     // Ініціалізація аудіо
     InitAudioDevice();
