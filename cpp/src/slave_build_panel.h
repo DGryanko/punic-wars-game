@@ -260,6 +260,7 @@ private:
             slotType[numBuildSlots++] = HQ_ROME;
             slotType[numBuildSlots++] = QUESTORIUM_ROME;
             slotType[numBuildSlots++] = BARRACKS_ROME;
+            slotType[numBuildSlots++] = TENTORIUM;
         } else {
             slotType[numBuildSlots++] = HQ_CARTHAGE;
             slotType[numBuildSlots++] = QUESTORIUM_ROME; // shared questorium
@@ -274,8 +275,20 @@ private:
             // HQ можна побудувати лише один раз
             return !playerHasHQ();
         }
+        if (type == TENTORIUM) {
+            // Тенторіум потребує Квесторіуму
+            return playerHasHQ() && playerHasBuilding(QUESTORIUM_ROME);
+        }
         // Всі інші будівлі потребують HQ
         return playerHasHQ();
+    }
+
+    bool playerHasBuilding(BuildingType type) const {
+        if (!buildings) return false;
+        for (const auto& b : *buildings) {
+            if (b.faction == playerFaction && b.type == type) return true;
+        }
+        return false;
     }
 
     bool playerHasHQ() const {
@@ -395,6 +408,8 @@ private:
 
         Building newBuilding;
         newBuilding.init(buildingType, playerFaction, pos);
+        newBuilding.is_under_construction = true;
+        newBuilding.build_timer = 0.0f;
         buildings->push_back(newBuilding);
         pathfindingManager.updateGrid(*buildings);
 

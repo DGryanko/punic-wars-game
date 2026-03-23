@@ -9,6 +9,7 @@
 #include "unit_order_panel.h"
 #include "slave_build_panel.h"
 #include "unit_group_panel.h"
+#include "tentorium_panel.h"
 #include "formation_manager.h"
 #include "resource_display.h"
 #include "unit.h"
@@ -20,6 +21,7 @@
 #include "render_queue.h"
 #include "game_constants.h"
 #include "debug_logger.h"
+#include "sound_manager.h"
 #include <vector>
 #include <cmath>
 #include <ctime>
@@ -177,6 +179,7 @@ FactionSpawner* factionSpawner = nullptr;
 UnitOrderPanel* unitOrderPanel = nullptr;
 SlaveBuildPanel* slaveBuildPanel = nullptr;
 UnitGroupPanel* unitGroupPanel = nullptr;
+TentoriumPanel* tentoriumPanel = nullptr;
 ResourceDisplay* resourceDisplay = nullptr;
 
 // Система виділення областю
@@ -1641,6 +1644,11 @@ void HandleClicks() {
         }
     }
 
+    // Перевіряємо клік по панелі торгівлі тенторіуму
+    if (tentoriumPanel && tentoriumPanel->isVisible()) {
+        if (tentoriumPanel->handleClick(mousePos)) return;
+    }
+
     // Перевіряємо клік по панелі будівництва рабом
     if (slaveBuildPanel && slaveBuildPanel->isVisible()) {
         slaveBuildPanel->handleClick(mousePos);
@@ -1685,6 +1693,7 @@ void HandleClicks() {
         if (!isDoubleClick) {
             // Скидаємо попередній вибір
             clearAllSelections();
+            if (tentoriumPanel) tentoriumPanel->setVisible(false);
             
             // НОВИЙ ПІДХІД: Конвертуємо клік в grid координати (використовуємо світові координати)
             ScreenCoords screenPos = {worldMousePos.x, worldMousePos.y};
@@ -1728,11 +1737,31 @@ void HandleClicks() {
                 if (buildingIndex >= 0) {
                     buildings[buildingIndex].selected = true;
                     selectedBuildingIndex = buildingIndex;
-                    LOG_CLICK("[CLICK] Selected building: %s at grid (%d, %d)\n", 
+                    LOG_CLICK("[CLICK] Selected building: %s at grid (%d, %d)\n",
                               buildings[buildingIndex].name.c_str(),
                               buildings[buildingIndex].position.row,
                               buildings[buildingIndex].position.col);
-                    
+
+                    // Tentorium panel visibility
+                    if (tentoriumPanel)
+                        tentoriumPanel->setVisible(buildings[buildingIndex].type == TENTORIUM);
+
+                    // HQ звук при виборі головного намету
+                    BuildingType btype = buildings[buildingIndex].type;
+                    if (btype == HQ_ROME || btype == HQ_CARTHAGE) {
+                        ScreenCoords bsc = buildings[buildingIndex].getScreenPosition();
+                        sfx.playOnceIfVisible(sfx.hq, {bsc.x, bsc.y}, mapCamera);
+                    } else if (btype == BARRACKS_ROME || btype == BARRACKS_CARTHAGE) {
+                        ScreenCoords bsc = buildings[buildingIndex].getScreenPosition();
+                        sfx.playOnceIfVisible(sfx.kntb, {bsc.x, bsc.y}, mapCamera);
+                    } else if (btype == QUESTORIUM_ROME) {
+                        ScreenCoords bsc = buildings[buildingIndex].getScreenPosition();
+                        sfx.playOnceIfVisible(sfx.qstr, {bsc.x, bsc.y}, mapCamera);
+                    } else if (btype == TENTORIUM) {
+                        ScreenCoords bsc = buildings[buildingIndex].getScreenPosition();
+                        sfx.playOnceIfVisible(sfx.coin, {bsc.x, bsc.y}, mapCamera);
+                    }
+
                     // Оновлюємо панель замовлення
                     if (unitOrderPanel) {
                         unitOrderPanel->setSelectedBuilding(buildingIndex);
@@ -2017,9 +2046,13 @@ void DrawGame() {
     ProcessResourceHarvesting();
     
     // Оновлення юнітів з перевіркою колізій та боєм
-    for (int i = 0; i < units.size(); i++) {
+    std::vector<Vector2> walkingSources;
+    for (int i = 0; i < (int)units.size(); i++) {
         // Видаляємо мертвих юнітів
         if (units[i].isDead()) {
+            // Звук смерті
+            ScreenCoords dsc = units[i].getScreenPosition();
+            sfx.playOnceIfVisible(sfx.die, {dsc.x, dsc.y}, mapCamera);
             units.erase(units.begin() + i);
             i--;
 
@@ -2061,6 +2094,11 @@ void DrawGame() {
         // Оновлюємо юніт з перевіркою колізій
         units[i].update(&buildings);
 
+        // Збираємо позиції для позиційних звуків
+        ScreenCoords usc = units[i].getScreenPosition();
+        if (units[i].is_moving && sfx.isOnScreen({usc.x, usc.y}, mapCamera))
+            walkingSources.push_back({usc.x, usc.y});
+
         // Sub-tile slot: призначаємо слот коли юніт зупинився
         if (!units[i].is_moving && units[i].slot_index < 0) {
             assignSlot(units[i], units, i);
@@ -2088,7 +2126,8 @@ void DrawGame() {
                     if (d <= units[i].attack_range) {
                         units[i].clearPath();
                         units[i].is_moving = false;
-                        units[i].attackTarget(units[ti]);
+                        if (units[i].attackTarget(units[ti]))
+                            sfx.playOnceIfVisible(sfx.battle, {myScreen.x, myScreen.y}, mapCamera);
                     } else {
                         GridCoords eg = units[ti].getGridPosition();
                         if (!units[i].is_moving || !(units[i].final_destination == eg))
@@ -2112,7 +2151,8 @@ void DrawGame() {
                     if (d <= units[i].attack_range * 2.0f) {
                         units[i].clearPath();
                         units[i].is_moving = false;
-                        units[i].attackTarget(units[j]);
+                        if (units[i].attackTarget(units[j]))
+                            sfx.playOnceIfVisible(sfx.battle, {myScreen.x, myScreen.y}, mapCamera);
                         break;
                     }
                 }
@@ -2134,7 +2174,8 @@ void DrawGame() {
                     if (d <= units[i].attack_range) {
                         units[i].clearPath();
                         units[i].is_moving = false;
-                        units[i].attackTarget(units[nearestEnemy]);
+                        if (units[i].attackTarget(units[nearestEnemy]))
+                            sfx.playOnceIfVisible(sfx.battle, {myScreen.x, myScreen.y}, mapCamera);
                     } else {
                         GridCoords eg = units[nearestEnemy].getGridPosition();
                         if (!units[i].is_moving || !(units[i].final_destination == eg))
@@ -2208,7 +2249,8 @@ void DrawGame() {
                     if (d <= units[i].attack_range) {
                         units[i].clearPath();
                         units[i].is_moving = false;
-                        units[i].attackTarget(units[nearestEnemy]);
+                        if (units[i].attackTarget(units[nearestEnemy]))
+                            sfx.playOnceIfVisible(sfx.battle, {myScreen.x, myScreen.y}, mapCamera);
                     } else {
                         GridCoords eg = units[nearestEnemy].getGridPosition();
                         if (!units[i].is_moving || !(units[i].final_destination == eg))
@@ -2223,9 +2265,13 @@ void DrawGame() {
             }
         }
     }
-    
-    // Оновлення будівель та виробництва
+
+    // Позиційний звук ходьби
+    sfx.updatePositional(sfx.walking, walkingSources, mapCamera, audioSettings.effectsVolume, 800.0f, 3.0f);
+
+    // Hammer звук — збираємо позиції будівель під будівництвом
     float deltaTime = GetFrameTime();
+    std::vector<Vector2> hammerSources;
     std::string startedUnit = "";
     for (int bi = 0; bi < (int)buildings.size(); bi++) {
         // Видаляємо знищені будівлі
@@ -2281,6 +2327,20 @@ void DrawGame() {
         }
         
         Building& building = buildings[bi];
+
+        // ── Будівництво (6 секунд) ───────────────────────────────────────────
+        if (building.is_under_construction) {
+            building.build_timer += deltaTime;
+            ScreenCoords bsc = building.getScreenPosition();
+            if (sfx.isOnScreen({bsc.x, bsc.y}, mapCamera))
+                hammerSources.push_back({bsc.x, bsc.y});
+            if (building.build_timer >= Building::BUILD_DURATION) {
+                building.is_under_construction = false;
+                building.build_timer = 0.0f;
+            }
+            // Будівля під час будівництва не виробляє юнітів
+            continue;
+        }
         std::string completedUnit = "";
         building.updateProduction(deltaTime, startedUnit, completedUnit);
         
@@ -2346,6 +2406,9 @@ void DrawGame() {
         }
         
     } // end building loop
+
+    // Позиційний звук молотка
+    sfx.updatePositional(sfx.hammer, hammerSources, mapCamera, audioSettings.effectsVolume, 700.0f, 2.0f);
     
     // Початок режиму 2D камери для карти та об'єктів
     BeginMode2D(mapCamera);
@@ -2479,6 +2542,11 @@ void DrawGame() {
     // Панель замовлення юнітів (нова система)
     if (unitOrderPanel) {
         unitOrderPanel->draw();
+    }
+
+    // Панель торгівлі тенторіуму
+    if (tentoriumPanel) {
+        tentoriumPanel->draw();
     }
     
     // Панель будівництва рабом
@@ -2669,6 +2737,7 @@ int main() {
     
     // Ініціалізація аудіо
     InitAudioDevice();
+    sfx.load(); // Завантаження ігрових звуків
 
     // Генерація UI click звуку (дерев'яний стук, ~40ms)
     {
@@ -2824,6 +2893,9 @@ int main() {
 
     unitGroupPanel = new UnitGroupPanel();
     unitGroupPanel->loadSprites();
+
+    tentoriumPanel = new TentoriumPanel();
+    tentoriumPanel->init(playerFaction);
     
     resourceDisplay = new ResourceDisplay();
     resourceDisplay->init(resourcePanel, playerFaction);
@@ -2849,10 +2921,14 @@ int main() {
         // Оновлюємо музику
         if (audioInitialized) {
             UpdateMusicStream(currentMusic);
-            
+            if (isCrossfading) UpdateMusicStream(nextMusic);
+
             // Оновлюємо музичний стан в грі
             if (currentState == PLAYING) {
                 UpdateGameMusic();
+            } else if (currentState == VICTORY_SCREEN || currentState == DEFEAT_SCREEN) {
+                // Завершуємо crossfade на екранах перемоги/поразки
+                if (isCrossfading) UpdateCrossfade();
             }
         }
         
@@ -2942,8 +3018,10 @@ int main() {
     if (unitOrderPanel) delete unitOrderPanel;
     if (slaveBuildPanel) delete slaveBuildPanel;
     if (unitGroupPanel) { unitGroupPanel->unloadSprites(); delete unitGroupPanel; }
+    if (tentoriumPanel) { tentoriumPanel->unload(); delete tentoriumPanel; }
     if (resourceDisplay) delete resourceDisplay;
     if (uiSoundLoaded) UnloadSound(uiClickSound);
+    sfx.unload();
     
     CloseAudioDevice();
     

@@ -59,6 +59,11 @@ struct Building {
     // HP будівлі
     int hp = 0;
     int max_hp = 0;
+
+    // Будівництво
+    bool  is_under_construction = false;
+    float build_timer           = 0.0f;
+    static constexpr float BUILD_DURATION = 6.0f; // секунд
     
     // Текстури
     bool use_texture = true;        // Чи використовувати текстуру
@@ -315,6 +320,18 @@ struct Building {
             sprite.draw(screenPos, tint);
         }
         
+        // Прогрес будівництва
+        if (is_under_construction) {
+            float progress = (BUILD_DURATION > 0) ? build_timer / BUILD_DURATION : 0.0f;
+            int barWidth = 90;
+            int barX = (int)screenPos.x - barWidth / 2;
+            int barY = (int)screenPos.y - 90;
+            DrawRectangle(barX, barY, barWidth, 8, DARKGRAY);
+            DrawRectangle(barX, barY, (int)(barWidth * progress), 8, {255, 180, 0, 255});
+            DrawRectangleLinesEx({(float)barX, (float)barY, (float)barWidth, 8}, 1, WHITE);
+            DrawText("Building...", barX, barY - 14, 10, YELLOW);
+        }
+
         // Прогрес виробництва (поверх спрайту/debug)
         if (is_producing) {
             float progress = production_progress / production_time;
